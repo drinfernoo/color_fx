@@ -75,7 +75,7 @@ class SpotifyBackgroundColor:
         import numpy as np
         from PIL import Image
 
-        img = np.array(Image.open(img))
+        img = np.array(Image.open(img).convert(format))
 
         if format == 'RGB':
             self.img = img

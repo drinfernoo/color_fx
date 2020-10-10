@@ -10,3 +10,6 @@ turn_light_to_color:
     mode:
       description: (Optional) Changes the recognition mode.
       example: "'recognized' or 'complementary'"
+    top:
+      description: (Optional) Return the color with the specified colorness ranking, zero-indexed.
+      example: 3 - Returns the fourth most colorful color

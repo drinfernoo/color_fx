@@ -1,6 +1,7 @@
 """Provides an integration that can match the color of lights to the
    'entity_picture' of any supported 'media_player' device."""
 
+from collections import OrderedDict
 import io
 import logging
 import math
@@ -16,6 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 
 ATTR_URL = 'url'
 ATTR_MODE = 'mode'
+ATTR_TOP = 'top'
 
 SERVICE_TURN_LIGHT_TO_COLOR = 'turn_light_to_color'
 
@@ -33,6 +35,7 @@ if __name__ != "__main__":
     RECOGNIZE_COLOR_SCHEMA = vol.Schema({
         vol.Required(ATTR_URL): cv.url,
         vol.Optional(ATTR_MODE): cv.string,
+        vol.Optional(ATTR_TOP): cv.positive_int,
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
     }, extra=vol.ALLOW_EXTRA, required=True)
 
@@ -41,7 +44,7 @@ def setup(hass, config):
     def turn_light_to_color(call):
         call_data = dict(call.data)
         colors = ColorFX(hass, config[DOMAIN], call_data.pop(ATTR_URL),
-                         call_data.pop(ATTR_MODE)).best_colors()
+                         call_data.pop(ATTR_MODE), call_data.pop(ATTR_TOP)).best_colors()
         
         new_data = {ATTR_RGB_COLOR: colors}
         if colors[1:] == colors[:-1]:
@@ -103,7 +106,7 @@ class SpotifyBackgroundColor:
 
         self.img = np.array(img).astype(float)
 
-    def best_color(self, k=8, color_tol=10):
+    def best_color(self, k=8, color_tol=10, idx=0):
         """Returns a suitable background color for the given image.
 
         Uses k-means clustering to find `k` distinct colors in
@@ -134,13 +137,16 @@ class SpotifyBackgroundColor:
 
         colorfulness = [self.colorfulness(color[0], color[1], color[2]) for color in centroids]
         max_colorful = np.max(colorfulness)
+        colors = OrderedDict(sorted({colorfulness[i]: centroids[i] for i in range(len(colorfulness))}.items(), reverse=True))
+        
+        max_colorful = colors.keys()[idx]
 
         if max_colorful < color_tol:
             # If not colorful, set to default color
             best_color = DEFAULT_COLOR
         else:
             # Pick the most colorful color
-            best_color = centroids[np.argmax(colorfulness)]
+            best_color = colors.values()[idx]
 
         return int(best_color[0]), int(best_color[1]), int(best_color[2])
 
@@ -183,17 +189,18 @@ class SpotifyBackgroundColor:
 
 
 class ColorFX:
-    def __init__(self, hass, component_config, url, mode='recognized'):
+    def __init__(self, hass, component_config, url, mode='recognized', top=0):
         self.hass = hass
         self.config = component_config
         self.url = url
         self.mode = mode
+        self.top = top
 
     def best_colors(self):
         if self.mode in ['recognized', 'complementary']:
             image = Image.open(download_image(self.url))
             resized = self.calculate_size(image.size)
-            best_color = SpotifyBackgroundColor(image, image_processing_size=resized).best_color(k=4, color_tol=5)
+            best_color = SpotifyBackgroundColor(image, image_processing_size=resized).best_color(k=4, color_tol=5, idx=self.top)
             
             return best_color if self.mode == 'recognized' else [abs(color - 255) for color in best_color]
         else:

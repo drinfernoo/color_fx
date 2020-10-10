@@ -1,8 +1,10 @@
 """Provides an integration that can match the color of lights to the
    'entity_picture' of any supported 'media_player' device."""
 
-import logging
 import io
+import logging
+import math
+
 import urllib.request
 
 import numpy as np
@@ -17,7 +19,7 @@ ATTR_MODE = 'mode'
 
 SERVICE_TURN_LIGHT_TO_COLOR = 'turn_light_to_color'
 
-DEFAULT_IMAGE_RESIZE = (1920, 1080)
+DEFAULT_IMAGE_RESIZE = (100, 100)
 DEFAULT_COLOR = [230, 230, 230]
 
 if __name__ != "__main__":
@@ -38,22 +40,14 @@ if __name__ != "__main__":
 def setup(hass, config):
     def turn_light_to_color(call):
         call_data = dict(call.data)
-        colors = ColorFX(hass, config[DOMAIN], call_data.pop(ATTR_URL)).best_colors()
-        
-        mode = call_data.pop(ATTR_MODE)
-        if mode == 'complementary':
-            colors = [abs(color - 255) for color in colors]
-        elif mode == 'recognized':
-            colors = colors
-        else:
-            raise ValueError('Invalid Mode. Only \'recognized\' \
-                             and \'complementary\' are supported.')
+        colors = ColorFX(hass, config[DOMAIN], call_data.pop(ATTR_URL),
+                         call_data.pop(ATTR_MODE)).best_colors()
         
         new_data = {ATTR_RGB_COLOR: colors}
         if colors[1:] == colors[:-1]:
             new_data[ATTR_BRIGHTNESS] = 128
         call_data.update(new_data)
-        _LOGGER.debug('Calling {}'.format(call_data))
+        _LOGGER.info('Calling {}'.format(call_data))
 
         hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
     
@@ -95,7 +89,6 @@ class SpotifyBackgroundColor:
 
         """
 
-        img = Image.open(img)
         if format in ['RGB', 'BGR']:
             img = img.convert(format)
         else:
@@ -190,14 +183,32 @@ class SpotifyBackgroundColor:
 
 
 class ColorFX:
-    def __init__(self, hass, component_config, url):
+    def __init__(self, hass, component_config, url, mode='recognized'):
         self.hass = hass
         self.config = component_config
         self.url = url
+        self.mode = mode
 
     def best_colors(self):
-        image = download_image(self.url)
-        return SpotifyBackgroundColor(image, image_processing_size=DEFAULT_IMAGE_RESIZE).best_color(k=4, color_tol=5)
+        if self.mode in ['recognized', 'complementary']:
+            image = Image.open(download_image(self.url))
+            resized = self.calculate_size(image.size)
+            best_color = SpotifyBackgroundColor(image, image_processing_size=resized).best_color(k=4, color_tol=5)
+            
+            return best_color if self.mode == 'recognized' else [abs(color - 255) for color in best_color]
+        else:
+            raise ValueError('Invalid Mode. Only \'recognized\' \
+                             and \'complementary\' are supported.')
+                             
+    def calculate_size(self, original):
+        width, height = original
+        ratio = width / height
+        factor = math.ceil(width / 1000) * 2
+        resized = DEFAULT_IMAGE_RESIZE if ratio == 1 else (int(width // factor), int((width // factor) // ratio))
+        _LOGGER.info('({}, {}) -> {}'.format(width, height, resized))
+
+        return resized
+
 
 if __name__ == "__main__":
     params = {'k': 5, 'color_tol': 5}

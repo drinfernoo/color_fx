@@ -1,8 +1,20 @@
+"""Provides an integration that can match the color of lights to the
+   'entity_picture' of any supported 'media_player' device."""
+
 import logging
 import io
 import urllib.request
 
-DEFAULT_IMAGE_RESIZE = (100, 100)
+import numpy as np
+from PIL import Image
+from scipy.cluster.vq import kmeans
+
+DOMAIN = 'color_fx'
+_LOGGER = logging.getLogger(__name__)
+
+ATTR_URL = 'url'
+
+DEFAULT_IMAGE_RESIZE = (1920, 1080)
 DEFAULT_COLOR = [230, 230, 230]
 
 if __name__ != "__main__":
@@ -13,13 +25,8 @@ if __name__ != "__main__":
     from homeassistant.components.light import (ATTR_RGB_COLOR, ATTR_BRIGHTNESS)
     from homeassistant.components import light
 
-    _LOGGER = logging.getLogger(__name__)
-
-    ATTR_URL = 'url'
     SERVICE_RECOGNIZE_COLOR_AND_SET_LIGHT = 'turn_light_to_recognized_color'
     SERVICE_COMPLEMENTARY_COLOR_AND_SET_LIGHT = 'turn_light_to_complementary_color'
-    DOMAIN = 'color_recognizer'
-
     RECOGNIZE_COLOR_SCHEMA = vol.Schema({
         vol.Required(ATTR_URL): cv.url,
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
@@ -29,7 +36,7 @@ if __name__ != "__main__":
 def setup(hass, config):
     def turn_light_to_recognized_color(call):
         call_data = dict(call.data)
-        colors = ColorRecognizer(hass, config[DOMAIN], call_data.pop(ATTR_URL)).best_colors()
+        colors = ColorFX(hass, config[DOMAIN], call_data.pop(ATTR_URL)).best_colors()
         
         new_data = {ATTR_RGB_COLOR: colors}
         if colors[1:] == colors[:-1]:
@@ -60,7 +67,8 @@ def download_image(url):
     return io.BytesIO(urllib.request.urlopen(url).read())
 
 
-""" Taken from: https://github.com/davidkrantz/Colorfy """
+""" Credit to: https://github.com/davidkrantz/Colorfy for original
+    implementation."""
 class SpotifyBackgroundColor:
     """Analyzes an image and finds a fitting background color.
 
@@ -72,7 +80,7 @@ class SpotifyBackgroundColor:
 
     """
 
-    def __init__(self, img, format='RGB', image_processing_size=None, crop=True):
+    def __init__(self, img, format='RGB', image_processing_size=None, crop=False):
         """Prepare the image for analyzation.
 
         Args:
@@ -87,26 +95,21 @@ class SpotifyBackgroundColor:
             ValueError: If `format` is not RGB or BGR.
 
         """
-        import numpy as np
-        from PIL import Image
 
-        img = np.array(Image.open(img).convert(format))
-
-        if format == 'RGB':
-            self.img = img
-        elif format == 'BGR':
-            self.img = self.img[..., ::-1]
+        img = Image.open(img)
+        if format in ['RGB', 'BGR']:
+            img = img.convert(format)
         else:
             raise ValueError('Invalid format. Only RGB and BGR image ' \
                              'format supported.')
     
         if crop:
-            self.img = self.crop_center(img, 512, 512)
+            img = self.crop_center(img, 512, 512)
 
         if image_processing_size:
-            self.img = np.array(Image.fromarray(self.img).resize(image_processing_size, resample=Image.BILINEAR))
+            img = img.resize(image_processing_size, resample=Image.BILINEAR)
 
-        self.img = self.img.astype(float)
+        self.img = np.array(img).astype(float)
 
     def best_color(self, k=8, color_tol=10):
         """Returns a suitable background color for the given image.
@@ -132,8 +135,6 @@ class SpotifyBackgroundColor:
             tuple: (R, G, B). The calculated background color.
 
         """
-        import numpy as np
-        from scipy.cluster.vq import kmeans
 
         self.img = self.img.reshape((self.img.shape[0]*self.img.shape[1], 3))
 
@@ -167,7 +168,6 @@ class SpotifyBackgroundColor:
             float: Colorfulness metric.
 
         """
-        import numpy as np
 
         rg = np.absolute(r - g)
         yb = np.absolute(0.5 * (r + g) - b)
@@ -183,13 +183,14 @@ class SpotifyBackgroundColor:
         return std_root + (0.3 * mean_root)
         
     def crop_center(self, img, cropx, cropy):
+        img = np.array(img)
         y, x = img.shape[:2]
         startx = x // 2 - (cropx // 2)
         starty = y // 2 - (cropy // 2)
-        return img[starty:starty + cropy, startx:startx + cropx]
+        return Image.fromarray(img[starty:starty + cropy, startx:startx + cropx])
 
 
-class ColorRecognizer:
+class ColorFX:
     def __init__(self, hass, component_config, url):
         self.hass = hass
         self.config = component_config

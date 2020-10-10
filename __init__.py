@@ -13,6 +13,9 @@ DOMAIN = 'color_fx'
 _LOGGER = logging.getLogger(__name__)
 
 ATTR_URL = 'url'
+ATTR_MODE = 'mode'
+
+SERVICE_TURN_LIGHT_TO_COLOR = 'turn_light_to_color'
 
 DEFAULT_IMAGE_RESIZE = (1920, 1080)
 DEFAULT_COLOR = [230, 230, 230]
@@ -25,40 +28,36 @@ if __name__ != "__main__":
     from homeassistant.components.light import (ATTR_RGB_COLOR, ATTR_BRIGHTNESS)
     from homeassistant.components import light
 
-    SERVICE_RECOGNIZE_COLOR_AND_SET_LIGHT = 'turn_light_to_recognized_color'
-    SERVICE_COMPLEMENTARY_COLOR_AND_SET_LIGHT = 'turn_light_to_complementary_color'
     RECOGNIZE_COLOR_SCHEMA = vol.Schema({
         vol.Required(ATTR_URL): cv.url,
+        vol.Optional(ATTR_MODE): cv.string,
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-    }, extra=vol.ALLOW_EXTRA)
+    }, extra=vol.ALLOW_EXTRA, required=True)
 
 
 def setup(hass, config):
-    def turn_light_to_recognized_color(call):
+    def turn_light_to_color(call):
         call_data = dict(call.data)
         colors = ColorFX(hass, config[DOMAIN], call_data.pop(ATTR_URL)).best_colors()
+        
+        mode = call_data.pop(ATTR_MODE)
+        if mode == 'complementary':
+            colors = [abs(color - 255) for color in colors]
+        elif mode == 'recognized':
+            colors = colors
+        else:
+            raise ValueError('Invalid Mode. Only \'recognized\' \
+                             and \'complementary\' are supported.')
         
         new_data = {ATTR_RGB_COLOR: colors}
         if colors[1:] == colors[:-1]:
             new_data[ATTR_BRIGHTNESS] = 128
         call_data.update(new_data)
-
-        hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
-
-    def turn_light_to_complementary_color(call):
-        call_data = dict(call.data)
-        colors = ColorRecognizer(hass, config[DOMAIN], call_data.pop(ATTR_URL)).best_colors()
-        complement_colors = [abs(color - 255) for color in colors]
-        
-        new_data = {ATTR_RGB_COLOR: complement_colors}
-        if complement_colors[1:] == complement_colors[:-1]:
-            new_data[ATTR_BRIGHTNESS] = 128
-        call_data.update(new_data)
+        _LOGGER.debug('Calling {}'.format(call_data))
 
         hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
     
-    hass.services.register(DOMAIN, SERVICE_RECOGNIZE_COLOR_AND_SET_LIGHT, turn_light_to_recognized_color, schema=RECOGNIZE_COLOR_SCHEMA)
-    hass.services.register(DOMAIN, SERVICE_COMPLEMENTARY_COLOR_AND_SET_LIGHT, turn_light_to_complementary_color, schema=RECOGNIZE_COLOR_SCHEMA)
+    hass.services.register(DOMAIN, SERVICE_TURN_LIGHT_TO_COLOR, turn_light_to_color, schema=RECOGNIZE_COLOR_SCHEMA)
 
     return True
 

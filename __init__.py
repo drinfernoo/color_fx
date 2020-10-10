@@ -25,14 +25,14 @@ if __name__ != "__main__":
 
 
 def setup(hass, config):
-    def turn_lights_to_recognized_color(call):
+    def turn_light_to_recognized_color(call):
         call_data = dict(call.data)
         colors = ColorRecognizer(hass, config[DOMAIN], call_data.pop(ATTR_URL)).best_colors()
         call_data.update({ATTR_RGB_COLOR: colors})
 
         hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
-
-    hass.services.register(DOMAIN, SERVICE_RECOGNIZE_COLOR_AND_SET_LIGHT, turn_lights_to_recognized_color, schema=RECOGNIZE_COLOR_SCHEMA)
+    
+    hass.services.register(DOMAIN, SERVICE_RECOGNIZE_COLOR_AND_SET_LIGHT, turn_light_to_recognized_color, schema=RECOGNIZE_COLOR_SCHEMA)
 
     return True
 

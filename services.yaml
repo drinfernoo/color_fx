@@ -7,3 +7,12 @@ turn_light_to_recognized_color:
     url:
       description: URL of an image to use for color recognition.
       example: https://i.scdn.co/image/ab67616d00001e028692b52d4f1a5d072e095b28
+turn_light_to_complementary_color:
+  description: Changes the specified lights to complement a prominent color from the image specifed.
+  fields:
+    entity_id:
+      description: entity_id of the light you wish to change.
+      example: light.living_room
+    url:
+      description: URL of an image to use for color recognition.
+      example: https://i.scdn.co/image/ab67616d00001e028692b52d4f1a5d072e095b28

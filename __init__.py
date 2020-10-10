@@ -17,6 +17,7 @@ if __name__ != "__main__":
 
     ATTR_URL = 'url'
     SERVICE_RECOGNIZE_COLOR_AND_SET_LIGHT = 'turn_light_to_recognized_color'
+    SERVICE_COMPLEMENTARY_COLOR_AND_SET_LIGHT = 'turn_light_to_complementary_color'
     DOMAIN = 'color_recognizer'
 
     RECOGNIZE_COLOR_SCHEMA = vol.Schema({
@@ -36,8 +37,21 @@ def setup(hass, config):
         call_data.update(new_data)
 
         hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
+
+    def turn_light_to_complementary_color(call):
+        call_data = dict(call.data)
+        colors = ColorRecognizer(hass, config[DOMAIN], call_data.pop(ATTR_URL)).best_colors()
+        complement_colors = [abs(color - 255) for color in colors]
+        
+        new_data = {ATTR_RGB_COLOR: complement_colors}
+        if complement_colors[1:] == complement_colors[:-1]:
+            new_data[ATTR_BRIGHTNESS] = 128
+        call_data.update(new_data)
+
+        hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
     
     hass.services.register(DOMAIN, SERVICE_RECOGNIZE_COLOR_AND_SET_LIGHT, turn_light_to_recognized_color, schema=RECOGNIZE_COLOR_SCHEMA)
+    hass.services.register(DOMAIN, SERVICE_COMPLEMENTARY_COLOR_AND_SET_LIGHT, turn_light_to_complementary_color, schema=RECOGNIZE_COLOR_SCHEMA)
 
     return True
 

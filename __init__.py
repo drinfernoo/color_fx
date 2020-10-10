@@ -41,6 +41,7 @@ def setup(hass, config):
 
     return True
 
+
 def download_image(url):
     return io.BytesIO(urllib.request.urlopen(url).read())
 
@@ -57,7 +58,7 @@ class SpotifyBackgroundColor:
 
     """
 
-    def __init__(self, img, format='RGB', image_processing_size=None):
+    def __init__(self, img, format='RGB', image_processing_size=None, crop=True):
         """Prepare the image for analyzation.
 
         Args:
@@ -84,6 +85,9 @@ class SpotifyBackgroundColor:
         else:
             raise ValueError('Invalid format. Only RGB and BGR image ' \
                              'format supported.')
+    
+        if crop:
+            self.img = self.crop_center(img, 512, 512)
 
         if image_processing_size:
             self.img = np.array(Image.fromarray(self.img).resize(image_processing_size, resample=Image.BILINEAR))
@@ -163,6 +167,12 @@ class SpotifyBackgroundColor:
         mean_root = np.sqrt((rb_mean ** 2) + (yb_mean ** 2))
 
         return std_root + (0.3 * mean_root)
+        
+    def crop_center(self, img, cropx, cropy):
+        y, x = img.shape[:2]
+        startx = x // 2 - (cropx // 2)
+        starty = y // 2 - (cropy // 2)
+        return img[starty:starty + cropy, startx:startx + cropx]
 
 
 class ColorRecognizer:

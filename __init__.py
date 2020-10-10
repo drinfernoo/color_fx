@@ -3,13 +3,14 @@ import io
 import urllib.request
 
 DEFAULT_IMAGE_RESIZE = (100, 100)
+DEFAULT_COLOR = [230, 230, 230]
 
 if __name__ != "__main__":
     import voluptuous as vol
 
     from homeassistant.helpers import config_validation as cv
     from homeassistant.const import (ATTR_ENTITY_ID, SERVICE_TURN_ON)
-    from homeassistant.components.light import (ATTR_RGB_COLOR)
+    from homeassistant.components.light import (ATTR_RGB_COLOR, ATTR_BRIGHTNESS)
     from homeassistant.components import light
 
     _LOGGER = logging.getLogger(__name__)
@@ -28,7 +29,11 @@ def setup(hass, config):
     def turn_light_to_recognized_color(call):
         call_data = dict(call.data)
         colors = ColorRecognizer(hass, config[DOMAIN], call_data.pop(ATTR_URL)).best_colors()
-        call_data.update({ATTR_RGB_COLOR: colors})
+        
+        new_data = {ATTR_RGB_COLOR: colors}
+        if colors[1:] == colors[:-1]:
+            new_data[ATTR_BRIGHTNESS] = 128
+        call_data.update(new_data)
 
         hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
     
@@ -120,8 +125,8 @@ class SpotifyBackgroundColor:
         max_colorful = np.max(colorfulness)
 
         if max_colorful < color_tol:
-            # If not colorful, set to gray
-            best_color = [230, 230, 230]
+            # If not colorful, set to default color
+            best_color = DEFAULT_COLOR
         else:
             # Pick the most colorful color
             best_color = centroids[np.argmax(colorfulness)]

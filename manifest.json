@@ -1,0 +1,8 @@
+{
+  "domain": "color_fx",
+  "name": "Color FX",
+  "documentation": "https://www.github.com/drinfernoo/color_fx",
+  "dependencies": [],
+  "codeowners": ["@drinfernoo"],
+  "requirements": ["numpy", "pillow", "scipy"]
+}

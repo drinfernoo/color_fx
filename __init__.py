@@ -12,8 +12,6 @@ if __name__ != "__main__":
     from homeassistant.components.light import (ATTR_RGB_COLOR)
     from homeassistant.components import light
 
-    REQUIREMENTS = ['numpy==1.16', 'pillow', 'scipy']
-
     _LOGGER = logging.getLogger(__name__)
 
     ATTR_URL = 'url'

@@ -8,10 +8,6 @@ import math
 
 import urllib.request
 
-import numpy as np
-from PIL import Image
-from scipy.cluster.vq import kmeans
-
 DOMAIN = 'color_fx'
 _LOGGER = logging.getLogger(__name__)
 
@@ -19,7 +15,8 @@ ATTR_URL = 'url'
 ATTR_MODE = 'mode'
 ATTR_TOP = 'top'
 
-SERVICE_TURN_LIGHT_TO_COLOR = 'turn_light_to_color'
+SERVICE_TURN_LIGHT_TO_MATCHED_COLOR = 'turn_light_to_matched_color'
+SERVICE_TURN_LIGHT_TO_RANDOM_COLOR = 'turn_light_to_random_color'
 
 DEFAULT_IMAGE_RESIZE = (100, 100)
 DEFAULT_COLOR = [230, 230, 230]
@@ -29,23 +26,30 @@ if __name__ != "__main__":
 
     from homeassistant.helpers import config_validation as cv
     from homeassistant.const import (ATTR_ENTITY_ID, SERVICE_TURN_ON)
-    from homeassistant.components.light import (ATTR_RGB_COLOR, ATTR_BRIGHTNESS)
+    from homeassistant.components.light import (ATTR_RGB_COLOR, ATTR_HS_COLOR, ATTR_BRIGHTNESS)
     from homeassistant.components import light
 
-    RECOGNIZE_COLOR_SCHEMA = vol.Schema({
+    MATCHED_COLOR_SCHEMA = vol.Schema({
+        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
         vol.Required(ATTR_URL): cv.url,
         vol.Optional(ATTR_MODE): cv.string,
         vol.Optional(ATTR_TOP): cv.positive_int,
+    }, extra=vol.ALLOW_EXTRA)
+
+    RANDOM_COLOR_SCHEMA = vol.Schema({
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-    }, extra=vol.ALLOW_EXTRA, required=True)
+        vol.Optional(ATTR_MODE): cv.string
+    }, extra=vol.ALLOW_EXTRA)
 
 
 def setup(hass, config):
-    def turn_light_to_color(call):
+    def turn_light_to_matched_color(call):
         call_data = dict(call.data)
-        colors = ColorFX(hass, config[DOMAIN], call_data.pop(ATTR_URL),
-                         call_data.pop(ATTR_MODE), call_data.pop(ATTR_TOP)).best_colors()
-        
+        color_fx = ColorFX(hass, config[DOMAIN])
+        colors = colors_fx.matched_color(call_data.pop(ATTR_URL),
+                                         call_data.pop(ATTR_MODE),
+                                         call_data.pop(ATTR_TOP))
+
         new_data = {ATTR_RGB_COLOR: colors}
         if colors[1:] == colors[:-1]:
             new_data[ATTR_BRIGHTNESS] = 128
@@ -53,14 +57,40 @@ def setup(hass, config):
         _LOGGER.info('Calling {}'.format(call_data))
 
         hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
-    
-    hass.services.register(DOMAIN, SERVICE_TURN_LIGHT_TO_COLOR, turn_light_to_color, schema=RECOGNIZE_COLOR_SCHEMA)
+
+    def turn_light_to_random_color(call):
+        call_data = dict(call.data)
+        color_fx = ColorFX(hass, config[DOMAIN])
+        mode = call_data.pop(ATTR_MODE)
+        colors = color_fx.random_color(mode)
+
+        new_data = {mode: colors}
+        new_data[ATTR_BRIGHTNESS] = 192
+        call_data.update(new_data)
+        _LOGGER.info('Calling {}'.format(call_data))
+
+        hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
+
+    hass.services.register(DOMAIN, SERVICE_TURN_LIGHT_TO_MATCHED_COLOR,
+                           turn_light_to_matched_color, schema=MATCHED_COLOR_SCHEMA)
+    hass.services.register(DOMAIN, SERVICE_TURN_LIGHT_TO_RANDOM_COLOR,
+                           turn_light_to_random_color, schema=RANDOM_COLOR_SCHEMA)
 
     return True
 
 
 def download_image(url):
     return io.BytesIO(urllib.request.urlopen(url).read())
+
+
+def calculate_size(self, original):
+    width, height = original
+    ratio = width / height
+    factor = math.ceil(width / 1000) * 2
+    resized = DEFAULT_IMAGE_RESIZE if ratio == 1 else (int(width // factor), int((width // factor) // ratio))
+    _LOGGER.info('({}, {}) -> {}'.format(width, height, resized))
+
+    return resized
 
 
 """ Credit to: https://github.com/davidkrantz/Colorfy for original
@@ -76,7 +106,7 @@ class SpotifyBackgroundColor:
 
     """
 
-    def __init__(self, img, format='RGB', image_processing_size=None, crop=False):
+    def __init__(self, url, format='RGB', resize=None, crop=False):
         """Prepare the image for analyzation.
 
         Args:
@@ -91,6 +121,11 @@ class SpotifyBackgroundColor:
             ValueError: If `format` is not RGB or BGR.
 
         """
+        import numpy as np
+        from PIL import Image
+        
+        img = Image.open(download_image(url))
+
 
         if format in ['RGB', 'BGR']:
             img = img.convert(format)
@@ -101,8 +136,9 @@ class SpotifyBackgroundColor:
         if crop:
             img = self.crop_center(img, 512, 512)
 
-        if image_processing_size:
-            img = img.resize(image_processing_size, resample=Image.BILINEAR)
+        if resize:
+            resized = calculate_size(image.size)
+            img = img.resize(resized, resample=Image.BILINEAR)
 
         self.img = np.array(img).astype(float)
 
@@ -130,6 +166,7 @@ class SpotifyBackgroundColor:
             tuple: (R, G, B). The calculated background color.
 
         """
+        from scipy.cluster.vq import kmeans
 
         self.img = self.img.reshape((self.img.shape[0]*self.img.shape[1], 3))
 
@@ -138,7 +175,7 @@ class SpotifyBackgroundColor:
         colorfulness = [self.colorfulness(color[0], color[1], color[2]) for color in centroids]
         paired_colorfulness = {colorfulness[i]: centroids[i] for i in range(len(colorfulness))}
         colors = {c: paired_colorfulness[c] for c in sorted(paired_colorfulness, reverse=True)}
-        
+
         max_colorful = list(colors.keys())[idx]
 
         if max_colorful < color_tol:
@@ -166,6 +203,7 @@ class SpotifyBackgroundColor:
             float: Colorfulness metric.
 
         """
+        import numpy as np
 
         rg = np.absolute(r - g)
         yb = np.absolute(0.5 * (r + g) - b)
@@ -179,8 +217,11 @@ class SpotifyBackgroundColor:
         mean_root = np.sqrt((rb_mean ** 2) + (yb_mean ** 2))
 
         return std_root + (0.3 * mean_root)
-        
+
     def crop_center(self, img, cropx, cropy):
+        import numpy as np
+        from PIL import Image
+        
         img = np.array(img)
         y, x = img.shape[:2]
         startx = x // 2 - (cropx // 2)
@@ -189,32 +230,28 @@ class SpotifyBackgroundColor:
 
 
 class ColorFX:
-    def __init__(self, hass, component_config, url, mode='recognized', top=0):
+    def __init__(self, hass, component_config):
         self.hass = hass
         self.config = component_config
-        self.url = url
-        self.mode = mode
-        self.top = top
 
-    def best_colors(self):
-        if self.mode in ['recognized', 'complementary']:
-            image = Image.open(download_image(self.url))
-            resized = self.calculate_size(image.size)
-            best_color = SpotifyBackgroundColor(image, image_processing_size=resized).best_color(k=4, color_tol=5, idx=self.top)
-            
-            return best_color if self.mode == 'recognized' else [abs(color - 255) for color in best_color]
+    def matched_color(self, url, mode='recognized', top=0):
+        if mode in ['recognized', 'complementary']:
+            best_color = SpotifyBackgroundColor(url).best_color(k=4, color_tol=5, idx=top)
+
+            return best_color if mode == 'recognized' else [abs(color - 255) for color in best_color]
         else:
             raise ValueError('Invalid Mode. Only \'recognized\' \
                              and \'complementary\' are supported.')
-                             
-    def calculate_size(self, original):
-        width, height = original
-        ratio = width / height
-        factor = math.ceil(width / 1000) * 2
-        resized = DEFAULT_IMAGE_RESIZE if ratio == 1 else (int(width // factor), int((width // factor) // ratio))
-        _LOGGER.info('({}, {}) -> {}'.format(width, height, resized))
 
-        return resized
+    def random_color(self, mode='hs_color'):
+        if mode in ['hs_color', 'rgb_color']:
+            p = (360, 101) if mode == 'hs_color' else (256, 256, 256)
+        else:
+            raise ValueError('Invalid Mode. Only \'rgb_color\' and \'hs_color\' \
+                             are supported.')
+
+        import random
+        return [random.randint(0, i) for i in p]
 
 
 if __name__ == "__main__":

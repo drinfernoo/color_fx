@@ -13,7 +13,7 @@ _LOGGER = logging.getLogger(__name__)
 
 ATTR_URL = 'url'
 ATTR_MODE = 'mode'
-ATTR_TOP = 'top'
+ATTR_SAME_COLOR = 'same_color'
 
 SERVICE_TURN_LIGHT_TO_MATCHED_COLOR = 'turn_light_to_matched_color'
 SERVICE_TURN_LIGHT_TO_RANDOM_COLOR = 'turn_light_to_random_color'
@@ -33,11 +33,13 @@ if __name__ != "__main__":
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
         vol.Required(ATTR_URL): cv.url,
         vol.Optional(ATTR_MODE, default='recognized'): cv.string,
+        vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean
     }, extra=vol.ALLOW_EXTRA)
 
     RANDOM_COLOR_SCHEMA = vol.Schema({
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-        vol.Optional(ATTR_MODE, default='hs_color'): cv.string
+        vol.Optional(ATTR_MODE, default='hs_color'): cv.string,
+        vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean
     }, extra=vol.ALLOW_EXTRA)
 
 
@@ -46,21 +48,30 @@ def setup(hass, config):
         call_data = dict(call.data)
         color_fx = ColorFX(hass, config[DOMAIN])
         mode = call_data.pop(ATTR_MODE)
+        same_color = call_data.pop(ATTR_SAME_COLOR)
+        
         colors = color_fx.matched_colors(call_data.pop(ATTR_URL),
                                          mode,
                                          len(call_data[ATTR_ENTITY_ID]) + 1)
-
         colorfulness = list(colors.keys())
+        
         calls = []
-        for idx, entity in enumerate(call_data[ATTR_ENTITY_ID]):
-            color = colors[colorfulness[idx]]
-            if mode == 'complementary':
-                color = [abs(c - 255) for c in color]
-
-            new_data = {ATTR_ENTITY_ID: [entity]}
+        if same_color:
+            color = colors[colorfulness[0]]
+            new_data = {ATTR_ENTITY_ID: call_data[ATTR_ENTITY_ID]}
             new_data[ATTR_RGB_COLOR] = color
             new_data[ATTR_BRIGHTNESS] = 128 if color[1:] == color[:-1] else 192
             calls.append(new_data)
+        else:
+            for idx, entity in enumerate(call_data[ATTR_ENTITY_ID]):
+                color = colors[colorfulness[idx]]
+                if mode == 'complementary':
+                    color = [abs(c - 255) for c in color]
+
+                new_data = {ATTR_ENTITY_ID: [entity]}
+                new_data[ATTR_RGB_COLOR] = color
+                new_data[ATTR_BRIGHTNESS] = 128 if color[1:] == color[:-1] else 192
+                calls.append(new_data)
 
         for call in calls:
             _LOGGER.info('Calling {}'.format(call))
@@ -70,15 +81,23 @@ def setup(hass, config):
         call_data = dict(call.data)
         color_fx = ColorFX(hass, config[DOMAIN])
         mode = call_data.pop(ATTR_MODE)
+        same_color = call_data.pop(ATTR_SAME_COLOR)
         
         calls = []
-        for entity in call_data[ATTR_ENTITY_ID]:
-            colors = color_fx.random_color(mode)
-
-            new_data = {ATTR_ENTITY_ID: [entity]}
-            new_data[mode] = colors
+        if same_color:
+            color = color_fx.random_color(mode)
+            new_data = {ATTR_ENTITY_ID: call_data[ATTR_ENTITY_ID]}
+            new_data[mode] = color
             new_data[ATTR_BRIGHTNESS] = 192
             calls.append(new_data)
+        else:
+            for entity in call_data[ATTR_ENTITY_ID]:
+                color = color_fx.random_color(mode)
+
+                new_data = {ATTR_ENTITY_ID: [entity]}
+                new_data[mode] = color
+                new_data[ATTR_BRIGHTNESS] = 192
+                calls.append(new_data)
         
         for call in calls:
             _LOGGER.info('Calling {}'.format(call))

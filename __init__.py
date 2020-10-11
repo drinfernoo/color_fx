@@ -1,7 +1,6 @@
 """Provides an integration that can match the color of lights to the
    'entity_picture' of any supported 'media_player' device."""
 
-from collections import OrderedDict
 import io
 import logging
 import math
@@ -15,11 +14,22 @@ ATTR_URL = 'url'
 ATTR_MODE = 'mode'
 ATTR_SAME_COLOR = 'same_color'
 
+ATTR_RANGE_HUE = 'range_hue'
+ATTR_RANGE_SAT = 'range_sat'
+ATTR_RANGE_RED = 'range_red'
+ATTR_RANGE_GREEN = 'range_green'
+ATTR_RANGE_BLUE = 'range_blue'
+
 SERVICE_TURN_LIGHT_TO_MATCHED_COLOR = 'turn_light_to_matched_color'
 SERVICE_TURN_LIGHT_TO_RANDOM_COLOR = 'turn_light_to_random_color'
 
 DEFAULT_IMAGE_RESIZE = (100, 100)
 DEFAULT_COLOR = [230, 230, 230]
+DEFAULT_RANGES = {ATTR_RANGE_HUE: (0, 360),
+                  ATTR_RANGE_SAT: (80, 100),
+                  ATTR_RANGE_RED: (0, 255),
+                  ATTR_RANGE_GREEN: (0, 255),
+                  ATTR_RANGE_BLUE: (0, 255)}
 
 if __name__ != "__main__":
     import voluptuous as vol
@@ -33,7 +43,12 @@ if __name__ != "__main__":
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
         vol.Required(ATTR_URL): cv.url,
         vol.Optional(ATTR_MODE, default='recognized'): cv.string,
-        vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean
+        vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean,
+        vol.Optional(ATTR_RANGE_HUE, default=(0, 360)): cv.positive_int,
+        vol.Optional(ATTR_RANGE_SAT, default=(80, 100)): cv.positive_int,
+        vol.Optional(ATTR_RANGE_RED, default=(0, 255)): cv.positive_int,
+        vol.Optional(ATTR_RANGE_GREEN, default=(0, 255)): cv.positive_int,
+        vol.Optional(ATTR_RANGE_BLUE, default=(0, 255)): cv.positive_int
     }, extra=vol.ALLOW_EXTRA)
 
     RANDOM_COLOR_SCHEMA = vol.Schema({
@@ -49,12 +64,12 @@ def setup(hass, config):
         color_fx = ColorFX(hass, config[DOMAIN])
         mode = call_data.pop(ATTR_MODE)
         same_color = call_data.pop(ATTR_SAME_COLOR)
-        
+
         colors = color_fx.matched_colors(call_data.pop(ATTR_URL),
                                          mode,
                                          len(call_data[ATTR_ENTITY_ID]) + 1)
         colorfulness = list(colors.keys())
-        
+
         calls = []
         if same_color:
             color = colors[colorfulness[0]]
@@ -74,7 +89,7 @@ def setup(hass, config):
                 calls.append(new_data)
 
         for call in calls:
-            _LOGGER.info('Calling {}'.format(call))
+            _LOGGER.debug('Calling {}'.format(call))
             hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call)
 
     def turn_light_to_random_color(call):
@@ -82,25 +97,31 @@ def setup(hass, config):
         color_fx = ColorFX(hass, config[DOMAIN])
         mode = call_data.pop(ATTR_MODE)
         same_color = call_data.pop(ATTR_SAME_COLOR)
-        
+
+        ranges = DEFAULT_RANGES
+        range_keys = list(ranges.keys())
+        for idx, r in enumerate(range_keys):
+            if r in call_data:
+                ranges[r] = list(call_data.pop(r))
+
         calls = []
         if same_color:
-            color = color_fx.random_color(mode)
+            color = color_fx.random_color(mode, ranges)
             new_data = {ATTR_ENTITY_ID: call_data[ATTR_ENTITY_ID]}
             new_data[mode] = color
             new_data[ATTR_BRIGHTNESS] = 192
             calls.append(new_data)
         else:
             for entity in call_data[ATTR_ENTITY_ID]:
-                color = color_fx.random_color(mode)
+                color = color_fx.random_color(mode, ranges)
 
                 new_data = {ATTR_ENTITY_ID: [entity]}
                 new_data[mode] = color
                 new_data[ATTR_BRIGHTNESS] = 192
                 calls.append(new_data)
-        
+
         for call in calls:
-            _LOGGER.info('Calling {}'.format(call))
+            _LOGGER.debug('Calling {}'.format(call))
             hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call)
 
     hass.services.register(DOMAIN, SERVICE_TURN_LIGHT_TO_MATCHED_COLOR,
@@ -120,9 +141,13 @@ def calculate_size(original):
     ratio = width / height
     factor = math.ceil(width / 1000) * 2
     resized = DEFAULT_IMAGE_RESIZE if ratio == 1 else (int(width // factor), int((width // factor) // ratio))
-    _LOGGER.info('({}, {}) -> {}'.format(width, height, resized))
+    _LOGGER.debug('Resizing from ({}, {}) to {}'.format(width, height, resized))
 
     return resized
+
+
+def clamp(n, low, high):
+    return max(low, min(n, high))
 
 
 """ Credit to: https://github.com/davidkrantz/Colorfy for original
@@ -155,16 +180,14 @@ class SpotifyBackgroundColor:
         """
         import numpy as np
         from PIL import Image
-        
+
         img = Image.open(download_image(url))
-
-
         if format in ['RGB', 'BGR']:
             img = img.convert(format)
         else:
             raise ValueError('Invalid format. Only RGB and BGR image ' \
                              'format supported.')
-    
+
         if crop:
             img = self.crop_center(img, 512, 512)
 
@@ -250,7 +273,7 @@ class SpotifyBackgroundColor:
     def crop_center(self, img, cropx, cropy):
         import numpy as np
         from PIL import Image
-        
+
         img = np.array(img)
         y, x = img.shape[:2]
         startx = x // 2 - (cropx // 2)
@@ -272,15 +295,37 @@ class ColorFX:
             raise ValueError('Invalid Mode. Only \'recognized\' \
                              and \'complementary\' are supported.')
 
-    def random_color(self, mode='hs_color'):
+    def random_color(self, mode='hs_color', ranges=None):
         if mode in ['hs_color', 'rgb_color']:
-            p = (359, 100) if mode == 'hs_color' else (255, 255, 255)
+            ranges = ranges if ranges else DEFAULT_RANGES
+
+            for range in ranges:
+                if len(ranges[range]) == 1:
+                    ranges[range] = [ranges[range][0], ranges[range][0]]
+                elif len(ranges[range]) > 2:
+                    ranges[range] = [ranges[range][0], ranges[range][1]]
+
+            if any(ranges[i][0] > ranges[i][1] for i in ranges):
+                  raise ValueError('Lower bound cannot be greater than higher bound for range.')
+
+            import random
+            if mode == 'hs_color':
+                c = [random.randint(ranges[ATTR_RANGE_HUE][0], ranges[ATTR_RANGE_HUE][1]),
+                     random.randint(ranges[ATTR_RANGE_SAT][0], ranges[ATTR_RANGE_SAT][1])]
+                c[0] = clamp(c[0], DEFAULT_RANGES[ATTR_RANGE_HUE][0], DEFAULT_RANGES[ATTR_RANGE_HUE][1])
+                c[1] = clamp(c[1], DEFAULT_RANGES[ATTR_RANGE_SAT][0], DEFAULT_RANGES[ATTR_RANGE_SAT][1])
+            elif mode == 'rgb_color':
+                c = [random.randint(ranges[ATTR_RANGE_RED][0], ranges[ATTR_RANGE_RED][1]),
+                     random.randint(ranges[ATTR_RANGE_GREEN][0], ranges[ATTR_RANGE_GREEN][1]),
+                     random.randint(ranges[ATTR_RANGE_BLUE][0], ranges[ATTR_RANGE_BLUE][1])]
+                c[0] = clamp(c[0], DEFAULT_RANGES[ATTR_RANGE_RED][0], DEFAULT_RANGES[ATTR_RANGE_RED][1])
+                c[1] = clamp(c[1], DEFAULT_RANGES[ATTR_RANGE_GREEN][0], DEFAULT_RANGES[ATTR_RANGE_GREEN][1])
+                c[2] = clamp(c[2], DEFAULT_RANGES[ATTR_RANGE_BLUE][0], DEFAULT_RANGES[ATTR_RANGE_BLUE][1])
         else:
             raise ValueError('Invalid Mode. Only \'rgb_color\' and \'hs_color\' \
                              are supported.')
 
-        import random
-        return [random.randint(0, i) for i in p]
+        return c
 
 
 if __name__ == "__main__":

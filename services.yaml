@@ -22,6 +22,21 @@ turn_light_to_random_color:
     mode:
       description: (Optional) Changes the color space for the returned color.
       example: "'rgb_color' or 'hs_color'"
+    range_hue:
+      description: (Optional) Clamp hue value in the specified range.
+      example: 20, 120
+    range_sat:
+      description: (Optional) Clamp saturation value in the specified range.
+      example: 90
+    range_red:
+      description: (Optional) Clamp red value in the specified range.
+      example: 192, 240
+    range_green:
+      description: (Optional) Clamp green value in the specified range.
+      example: 32, 168
+    range_blue:
+      description: (Optional) Clamp blue value in the specified range.
+      example: 27, 255
     same_color:
       description: (Optional) Set all lights to the same color.
       example: "'true' or 'false'"

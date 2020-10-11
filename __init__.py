@@ -59,8 +59,7 @@ def setup(hass, config):
 
             new_data = {ATTR_ENTITY_ID: [entity]}
             new_data[ATTR_RGB_COLOR] = color
-            if color[1:] == color[:-1]:
-                new_data[ATTR_BRIGHTNESS] = 128
+            new_data[ATTR_BRIGHTNESS] = 128 if color[1:] == color[:-1] else 192
             calls.append(new_data)
 
         for call in calls:

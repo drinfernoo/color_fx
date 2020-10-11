@@ -10,9 +10,6 @@ turn_light_to_matched_color:
     mode:
       description: (Optional) Changes the recognition mode.
       example: "'recognized' or 'complementary'"
-    top:
-      description: (Optional) Return the color with the specified colorfulness ranking, zero-indexed.
-      example: 3 - Returns the fourth most colorful color
 turn_light_to_random_color:
   description: Changes the specified light to a random color.
   fields:

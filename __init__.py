@@ -33,7 +33,6 @@ if __name__ != "__main__":
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
         vol.Required(ATTR_URL): cv.url,
         vol.Optional(ATTR_MODE): cv.string,
-        vol.Optional(ATTR_TOP): cv.positive_int,
     }, extra=vol.ALLOW_EXTRA)
 
     RANDOM_COLOR_SCHEMA = vol.Schema({
@@ -46,17 +45,25 @@ def setup(hass, config):
     def turn_light_to_matched_color(call):
         call_data = dict(call.data)
         color_fx = ColorFX(hass, config[DOMAIN])
-        colors = colors_fx.matched_color(call_data.pop(ATTR_URL),
-                                         call_data.pop(ATTR_MODE),
-                                         call_data.pop(ATTR_TOP))
+        mode = call_data.pop(ATTR_MODE)
+        colors = color_fx.matched_colors(call_data.pop(ATTR_URL),
+                                         mode,
+                                         len(call_data[ATTR_ENTITY_ID]) + 1)
 
-        new_data = {ATTR_RGB_COLOR: colors}
-        if colors[1:] == colors[:-1]:
-            new_data[ATTR_BRIGHTNESS] = 128
-        call_data.update(new_data)
-        _LOGGER.info('Calling {}'.format(call_data))
+        colorfulness = list(colors.keys())
+        calls = []
+        for idx, entity in enumerate(call_data[ATTR_ENTITY_ID]):
+            color = colors[colorfulness[idx]]
 
-        hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
+            new_data = {ATTR_ENTITY_ID: [entity]}
+            new_data[ATTR_RGB_COLOR] = color
+            if color[1:] == color[:-1]:
+                new_data[ATTR_BRIGHTNESS] = 128
+            calls.append(new_data)
+
+        for call in calls:
+            _LOGGER.info('Calling {}'.format(call))
+            hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call)
 
     def turn_light_to_random_color(call):
         call_data = dict(call.data)
@@ -88,7 +95,7 @@ def download_image(url):
     return io.BytesIO(urllib.request.urlopen(url).read())
 
 
-def calculate_size(self, original):
+def calculate_size(original):
     width, height = original
     ratio = width / height
     factor = math.ceil(width / 1000) * 2
@@ -142,12 +149,12 @@ class SpotifyBackgroundColor:
             img = self.crop_center(img, 512, 512)
 
         if resize:
-            resized = calculate_size(image.size)
+            resized = calculate_size(img.size)
             img = img.resize(resized, resample=Image.BILINEAR)
 
         self.img = np.array(img).astype(float)
 
-    def best_color(self, k=8, color_tol=10, idx=0):
+    def best_colors(self, k=8, color_tol=10):
         """Returns a suitable background color for the given image.
 
         Uses k-means clustering to find `k` distinct colors in
@@ -181,16 +188,13 @@ class SpotifyBackgroundColor:
         paired_colorfulness = {colorfulness[i]: centroids[i] for i in range(len(colorfulness))}
         colors = {c: paired_colorfulness[c] for c in sorted(paired_colorfulness, reverse=True)}
 
-        max_colorful = list(colors.keys())[idx]
+        for c in colors:
+            if c < color_tol:
+                colors[c] = DEFAULT_COLOR
+            else:
+                colors[c] = [int(i) for i in colors[c]]
 
-        if max_colorful < color_tol:
-            # If not colorful, set to default color
-            best_color = DEFAULT_COLOR
-        else:
-            # Pick the most colorful color
-            best_color = list(colors.values())[idx]
-
-        return int(best_color[0]), int(best_color[1]), int(best_color[2])
+        return colors
 
     def colorfulness(self, r, g, b):
         """Returns a colorfulness index of given RGB combination.
@@ -239,11 +243,11 @@ class ColorFX:
         self.hass = hass
         self.config = component_config
 
-    def matched_color(self, url, mode='recognized', top=0):
+    def matched_colors(self, url, mode='recognized', top=2):
         if mode in ['recognized', 'complementary']:
-            best_color = SpotifyBackgroundColor(url).best_color(k=4, color_tol=5, idx=top)
+            best_colors = SpotifyBackgroundColor(url, resize=True).best_colors(k=top * 2, color_tol=5)
 
-            return best_color if mode == 'recognized' else [abs(color - 255) for color in best_color]
+            return best_colors
         else:
             raise ValueError('Invalid Mode. Only \'recognized\' \
                              and \'complementary\' are supported.')
@@ -263,6 +267,6 @@ if __name__ == "__main__":
     params = {'k': 5, 'color_tol': 5}
     print(params)
     image = download_image("https://f4.bcbits.com/img/a2074947048_10.jpg")
-    print(SpotifyBackgroundColor(image, image_processing_size=DEFAULT_IMAGE_RESIZE).best_color(**params))
+    print(SpotifyBackgroundColor(image).best_colors(**params))
     image = download_image("https://upload.wikimedia.org/wikipedia/en/thumb/2/27/Ghost_of_a_rose.jpg/220px-Ghost_of_a_rose.jpg")
-    print(SpotifyBackgroundColor(image, image_processing_size=DEFAULT_IMAGE_RESIZE).best_color(**params))
+    print(SpotifyBackgroundColor(image, resize=True).best_colors(**params))

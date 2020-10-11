@@ -62,14 +62,19 @@ def setup(hass, config):
         call_data = dict(call.data)
         color_fx = ColorFX(hass, config[DOMAIN])
         mode = call_data.pop(ATTR_MODE)
-        colors = color_fx.random_color(mode)
+        
+        calls = []
+        for entity in call_data[ATTR_ENTITY_ID]:
+            colors = color_fx.random_color(mode)
 
-        new_data = {mode: colors}
-        new_data[ATTR_BRIGHTNESS] = 192
-        call_data.update(new_data)
-        _LOGGER.info('Calling {}'.format(call_data))
-
-        hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call_data)
+            new_data = {ATTR_ENTITY_ID: [entity]}
+            new_data[mode] = colors
+            new_data[ATTR_BRIGHTNESS] = 192
+            calls.append(new_data)
+        
+        for call in calls:
+            _LOGGER.info('Calling {}'.format(call))
+            hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call)
 
     hass.services.register(DOMAIN, SERVICE_TURN_LIGHT_TO_MATCHED_COLOR,
                            turn_light_to_matched_color, schema=MATCHED_COLOR_SCHEMA)

@@ -32,12 +32,12 @@ if __name__ != "__main__":
     MATCHED_COLOR_SCHEMA = vol.Schema({
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
         vol.Required(ATTR_URL): cv.url,
-        vol.Optional(ATTR_MODE): cv.string,
+        vol.Optional(ATTR_MODE, default='recognized'): cv.string,
     }, extra=vol.ALLOW_EXTRA)
 
     RANDOM_COLOR_SCHEMA = vol.Schema({
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-        vol.Optional(ATTR_MODE): cv.string
+        vol.Optional(ATTR_MODE, default='hs_color'): cv.string
     }, extra=vol.ALLOW_EXTRA)
 
 

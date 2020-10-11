@@ -136,17 +136,17 @@ class SpotifyBackgroundColor:
         centroids = kmeans(self.img, k)[0]
 
         colorfulness = [self.colorfulness(color[0], color[1], color[2]) for color in centroids]
-        max_colorful = np.max(colorfulness)
-        colors = OrderedDict(sorted({colorfulness[i]: centroids[i] for i in range(len(colorfulness))}.items(), reverse=True))
+        paired_colorfulness = {colorfulness[i]: centroids[i] for i in range(len(colorfulness))}
+        colors = {c: paired_colorfulness[c] for c in sorted(paired_colorfulness, reverse=True)}
         
-        max_colorful = colors.keys()[idx]
+        max_colorful = list(colors.keys())[idx]
 
         if max_colorful < color_tol:
             # If not colorful, set to default color
             best_color = DEFAULT_COLOR
         else:
             # Pick the most colorful color
-            best_color = colors.values()[idx]
+            best_color = list(colors.values())[idx]
 
         return int(best_color[0]), int(best_color[1]), int(best_color[2])
 

@@ -250,7 +250,7 @@ class ColorFX:
 
     def random_color(self, mode='hs_color'):
         if mode in ['hs_color', 'rgb_color']:
-            p = (360, 101) if mode == 'hs_color' else (256, 256, 256)
+            p = (359, 100) if mode == 'hs_color' else (255, 255, 255)
         else:
             raise ValueError('Invalid Mode. Only \'rgb_color\' and \'hs_color\' \
                              are supported.')

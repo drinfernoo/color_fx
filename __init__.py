@@ -54,6 +54,8 @@ def setup(hass, config):
         calls = []
         for idx, entity in enumerate(call_data[ATTR_ENTITY_ID]):
             color = colors[colorfulness[idx]]
+            if mode == 'complementary':
+                color = [abs(c - 255) for c in color]
 
             new_data = {ATTR_ENTITY_ID: [entity]}
             new_data[ATTR_RGB_COLOR] = color

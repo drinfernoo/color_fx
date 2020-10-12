@@ -43,18 +43,18 @@ if __name__ != "__main__":
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
         vol.Required(ATTR_URL): cv.url,
         vol.Optional(ATTR_MODE, default='recognized'): cv.string,
+        vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean
+    }, extra=vol.ALLOW_EXTRA)
+
+    RANDOM_COLOR_SCHEMA = vol.Schema({
+        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
+        vol.Optional(ATTR_MODE, default='hs_color'): cv.string,
         vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean,
         vol.Optional(ATTR_RANGE_HUE, default=(0, 360)): cv.positive_int,
         vol.Optional(ATTR_RANGE_SAT, default=(80, 100)): cv.positive_int,
         vol.Optional(ATTR_RANGE_RED, default=(0, 255)): cv.positive_int,
         vol.Optional(ATTR_RANGE_GREEN, default=(0, 255)): cv.positive_int,
         vol.Optional(ATTR_RANGE_BLUE, default=(0, 255)): cv.positive_int
-    }, extra=vol.ALLOW_EXTRA)
-
-    RANDOM_COLOR_SCHEMA = vol.Schema({
-        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-        vol.Optional(ATTR_MODE, default='hs_color'): cv.string,
-        vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean
     }, extra=vol.ALLOW_EXTRA)
 
 

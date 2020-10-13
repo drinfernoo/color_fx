@@ -15,8 +15,9 @@ color_fx:
 ---
  * Turn light(s) to recognized colors from a supplied image URL
  * Turn light(s) to random colors
+ * Cycle light(s) through colors
  * Automatically handles any resolution of image
  * Flexible options for coloring multiple lights in a single call
- * Flexible options for control over random colors
+ * Flexible options for control over colors
 
 See [Services](https://github.com/drinfernoo/color_fx/wiki/Services) on the wiki for guidance on usage.

@@ -16,6 +16,8 @@ ATTR_URL = 'url'
 ATTR_MEDIA_PLAYER = 'media_player'
 ATTR_MODE = 'mode'
 ATTR_SAME_COLOR = 'same_color'
+ATTR_STEPS = 'steps'
+ATTR_START = 'start'
 
 ATTR_ENTITY_PICTURE = 'entity_picture'
 
@@ -34,16 +36,21 @@ ATTR_BLUE = 'blue'
 
 SERVICE_TURN_LIGHT_TO_MATCHED_COLOR = 'turn_light_to_matched_color'
 SERVICE_TURN_LIGHT_TO_RANDOM_COLOR = 'turn_light_to_random_color'
+SERVICE_TURN_LIGHT_TO_CYCLE_COLOR = 'turn_light_to_cycle_color'
 
 DEFAULT_IMAGE_RESIZE = (100, 100)
 DEFAULT_COLOR = [230, 230, 230]
-DEFAULT_BRIGHTNESS = 192
+DEFAULT_SATURATION = [80, 100]
+DEFAULT_SATURATION_RANGE = [0, 100]
+DEFAULT_BRIGHTNESS = [192, 192]
 DEFAULT_BRIGHTNESS_RANGE = [0, 255]
-DEFAULT_BRIGHTNESS_PCT = 75
+DEFAULT_BRIGHTNESS_PCT = [75, 75]
 DEFAULT_BRIGHTNESS_PCT_RANGE = [0, 100]
 DEFAULT_BRIGHTNESS_GRAY = 128
 DEFAULT_HS_COLORS = {ATTR_HUE: [0, 360], ATTR_SATURATION: [80, 100]}
 DEFAULT_RGB_COLORS = {ATTR_RED: [0, 255], ATTR_GREEN: [0, 255], ATTR_BLUE: [0, 255]}
+DEFAULT_STEPS = 12
+DEFAULT_START = 0
                   
 ERROR_MISSING_SOURCE = 'Must have either \'{}\' or \'{}\'.'.format(ATTR_MEDIA_PLAYER, ATTR_URL)
 ERROR_INVALID_MODE = 'Must be either \'{}\' or \'{}\'.'
@@ -104,6 +111,20 @@ if __name__ != "__main__":
                 GROUP_EXCLUSIVE_BRIGHTNESS): vol.Any(cv.positive_int, [cv.positive_int])
         })
     )
+    
+    CYCLE_COLOR_SCHEMA = vol.All(
+        vol.Schema({
+            vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
+            vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean,
+            vol.Optional(ATTR_STEPS, default=DEFAULT_STEPS): cv.positive_int,
+            vol.Optional(ATTR_START, default=DEFAULT_START): cv.positive_int,
+            vol.Optional(ATTR_SATURATION, default=DEFAULT_HS_COLORS[ATTR_SATURATION]): vol.Any(cv.positive_int, [cv.positive_int]),
+            vol.Exclusive(vol.Optional(ATTR_BRIGHTNESS, default=DEFAULT_BRIGHTNESS),
+                GROUP_EXCLUSIVE_BRIGHTNESS): vol.Any(cv.positive_int, [cv.positive_int]),
+            vol.Exclusive(vol.Optional(ATTR_BRIGHTNESS_PCT, default=DEFAULT_BRIGHTNESS_PCT),
+                GROUP_EXCLUSIVE_BRIGHTNESS): vol.Any(cv.positive_int, [cv.positive_int])
+        })
+    )
 
 
 def setup(hass, config):
@@ -138,7 +159,8 @@ def setup(hass, config):
                     _LOGGER.info('{} has no {} attribute.'.format(entity, ATTR_ENTITY_PICTURE))
                     return
             else:
-                raise ValueError('{} is unavailable in the system.'.format(entity))
+                _LOGGER.info('{} is unavailable in the system.'.format(entity))
+                return
                 
         brightness_mode = ATTR_BRIGHTNESS
         brightness = DEFAULT_BRIGHTNESS
@@ -232,11 +254,86 @@ def setup(hass, config):
         for call in calls:
             _LOGGER.debug('Calling {}'.format(call))
             hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call)
+            
+    def turn_light_to_cycle_color(call):
+        call_data = dict(call.data)
+        color_fx = ColorFX(hass, config[DOMAIN])
+        
+        saturation_ranges = call_data.pop(ATTR_SATURATION)
+        
+        brightness_mode = ATTR_BRIGHTNESS
+        brightness_ranges = {ATTR_BRIGHTNESS: DEFAULT_BRIGHTNESS}
+        brightness_data = {}
+        if ATTR_BRIGHTNESS_PCT in call_data:
+            brightness_mode = ATTR_BRIGHTNESS_PCT
+            brightness_ranges = DEFAULT_BRIGHTNESS_PCT
+            brightness_data = {ATTR_BRIGHTNESS_PCT: call_data.pop(ATTR_BRIGHTNESS_PCT)}
+        elif ATTR_BRIGHTNESS in call_data:
+            brightness_data = {ATTR_BRIGHTNESS: call_data.pop(ATTR_BRIGHTNESS)}
+            
+        for r in [i for i in brightness_ranges if i in brightness_data]:
+            v = brightness_data[r]
+            brightness_ranges[r] = v if isinstance(v, list) else [v]
+            
+        same_color = call_data.pop(ATTR_SAME_COLOR)
+        steps = call_data.pop(ATTR_STEPS)
+        current = DEFAULT_START
+        start = call_data.pop(ATTR_START)
+        
+        calls = []
+        if same_color:
+            entity = call_data[ATTR_ENTITY_ID]
+            state = hass.states.get(entity)
+            if state:
+                attrs = state.attributes
+                if ATTR_HS_COLOR in attrs and attrs[ATTR_HS_COLOR]:
+                    current = attrs[ATTR_HS_COLOR][0]
+            else:
+                _LOGGER.info('{} is unavailable in the system.'.format(entity))
+                return
+            if start > 0:
+                current = start
+                
+            hue = color_fx.cycle_color(current, steps)
+            saturation = color_fx.random_saturation(saturation_ranges)
+            brightness = color_fx.random_brightness(brightness_ranges, brightness_mode)
+            
+            new_data = {ATTR_ENTITY_ID: entity}
+            new_data[ATTR_HS_COLOR] = [hue, saturation]
+            new_data[brightness_mode] = brightness
+            calls.append(new_data)
+        else:
+            for entity in call_data[ATTR_ENTITY_ID]:
+                state = hass.states.get(entity)
+                if state:
+                    attrs = state.attributes
+                    if ATTR_HS_COLOR in attrs and attrs[ATTR_HS_COLOR]:
+                        current = attrs[ATTR_HS_COLOR][0]
+                else:
+                    _LOGGER.info('{} is unavailable in the system.'.format(entity))
+                    return
+                if start > 0:
+                    current = start
+                
+                hue = color_fx.cycle_color(current, steps)
+                saturation = color_fx.random_saturation(saturation_ranges)
+                brightness = color_fx.random_brightness(brightness_ranges, brightness_mode)
+
+                new_data = {ATTR_ENTITY_ID: [entity]}
+                new_data[ATTR_HS_COLOR] = [hue, saturation]
+                new_data[brightness_mode] = brightness
+                calls.append(new_data)
+
+        for call in calls:
+            _LOGGER.debug('Calling {}'.format(call))
+            hass.services.call(light.DOMAIN, SERVICE_TURN_ON, call)
 
     hass.services.register(DOMAIN, SERVICE_TURN_LIGHT_TO_MATCHED_COLOR,
                            turn_light_to_matched_color, schema=MATCHED_COLOR_SCHEMA)
     hass.services.register(DOMAIN, SERVICE_TURN_LIGHT_TO_RANDOM_COLOR,
                            turn_light_to_random_color, schema=RANDOM_COLOR_SCHEMA)
+    hass.services.register(DOMAIN, SERVICE_TURN_LIGHT_TO_CYCLE_COLOR,
+                           turn_light_to_cycle_color, schema=CYCLE_COLOR_SCHEMA)
 
     return True
 
@@ -418,6 +515,15 @@ class ColorFX:
 
         return c
         
+    def random_saturation(self, ranges=DEFAULT_SATURATION, mode=ATTR_SATURATION):
+        import random
+        
+        ranges = self._fix_ranges(ranges, mode) 
+        c = random.randint(ranges[mode][0], ranges[mode][1])
+        c = clamp(c, DEFAULT_SATURATION_RANGE[0], DEFAULT_SATURATION_RANGE[1])
+
+        return c
+        
     def random_brightness(self, ranges=DEFAULT_BRIGHTNESS, mode=ATTR_BRIGHTNESS):
         import random
         
@@ -429,6 +535,10 @@ class ColorFX:
             c = clamp(c, DEFAULT_BRIGHTNESS_PCT_RANGE[0], DEFAULT_BRIGHTNESS_PCT_RANGE[1])
 
         return c
+        
+    def cycle_color(self, current=DEFAULT_START, steps=DEFAULT_STEPS):
+        hue = ((360 // steps) + current) % 360
+        return hue
     
     def _fix_ranges(self, ranges, mode=0):
         ranges = ranges if isinstance(ranges, dict) else {mode: ranges}

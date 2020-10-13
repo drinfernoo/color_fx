@@ -10,7 +10,8 @@ turn_light_to_matched_color:
     media_player:
       description: "A single entity ID for which to use the 'entity_picture' state for recognition. This must be specified if 'url' is not. If this is specified, 'host' must be set in the confgiguration."
       example: media_player.android_tv
-    host: "(Optional) Override 'host' from configuration. Can only be used with 'media_player'."
+    host:
+      description: "(Optional) Override 'host' from configuration. Can only be used with 'media_player'."
       example: "http://192.168.1.42:8123"
     mode:
       description: (Optional) Changes the recognition mode.
@@ -36,6 +37,27 @@ turn_light_to_random_color:
     rgb_color:
       description: (Optional) A dictionary of either ints or int lists, corresponding to each color component.
       example: "red: 30, green: [60, 90], blue: [75]"
+    brightness:
+      description: (Optional) An int or list of ints (0-255) to clamp random brightness between.
+      example: "[32, 192]"
+    brightness_pct:
+      description: (Optional) An int or list of ints (0-100) to clamp random brightness percentage between.
+      example: 75
+turn_light_to_cycle_color:
+  description: Cycles the specified light(s) along the hue spectrum.
+  fields:
+    entity_id:
+      description: Entity ID(s) of the light(s) you wish to change.
+      example: light.lamp
+    steps:
+      description: (Optional) Number of steps in the cycle.
+      example: 24
+    start:
+      description: (Optional) Override starting hue.
+      example: 180
+    saturation:
+      description: (Optional) An int or list of ints (0-100) to clamp random saturation between.
+      example: "[32, 90]"
     brightness:
       description: (Optional) An int or list of ints (0-255) to clamp random brightness between.
       example: "[32, 192]"

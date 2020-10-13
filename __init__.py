@@ -51,21 +51,9 @@ if __name__ != "__main__":
     from homeassistant.components import light
     
     CONFIG_SCHEMA = vol.Schema({
-        vol.Optional(CONF_HOST, default=''): cv.string
+        vol.Optional(CONF_HOST): cv.url
     }, extra=vol.ALLOW_EXTRA)
     
-    MATCHED_COLOR_SCHEMA = vol.All(
-        vol.Schema({
-            vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-            vol.Exclusive(ATTR_MEDIA_PLAYER, GROUP_EXCLUSIVE_IMAGE): cv.entity_id,
-            vol.Exclusive(ATTR_URL, GROUP_EXCLUSIVE_IMAGE): cv.url,
-            vol.Optional(ATTR_MODE, default=MODE_RECOGNIZED): vol.Any(MODE_RECOGNIZED, MODE_COMPLEMENTARY,
-                msg=ERROR_INVALID_MODE.format(MODE_RECOGNIZED, MODE_COMPLEMENTARY)),
-            vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean
-        }),
-        cv.has_at_least_one_key(ATTR_MEDIA_PLAYER, ATTR_URL)
-    )
-
     HS_COLOR_SCHEMA = vol.Schema({
         vol.Optional(ATTR_HUE, default=DEFAULT_HS_COLORS[ATTR_HUE]): vol.Any(cv.positive_int, [cv.positive_int]),
         vol.Optional(ATTR_SATURATION, default=DEFAULT_HS_COLORS[ATTR_SATURATION]): vol.Any(cv.positive_int, [cv.positive_int])
@@ -77,6 +65,20 @@ if __name__ != "__main__":
         vol.Optional(ATTR_BLUE, default=DEFAULT_RGB_COLORS[ATTR_BLUE]): vol.Any(cv.positive_int, [cv.positive_int])
     })
     
+    MATCHED_COLOR_SCHEMA = vol.All(
+        vol.Schema({
+            vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
+            vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean,
+            vol.Optional(CONF_HOST): cv.url,
+            vol.Exclusive(ATTR_MEDIA_PLAYER, GROUP_EXCLUSIVE_IMAGE): cv.entity_id,
+            vol.Exclusive(ATTR_URL, GROUP_EXCLUSIVE_IMAGE): cv.url,
+            vol.Optional(ATTR_MODE, default=MODE_RECOGNIZED): vol.Any(MODE_RECOGNIZED, MODE_COMPLEMENTARY,
+                msg=ERROR_INVALID_MODE.format(MODE_RECOGNIZED, MODE_COMPLEMENTARY)),
+        }),
+        cv.has_at_least_one_key(ATTR_MEDIA_PLAYER, ATTR_URL),
+        cv.has_at_most_one_key(ATTR_URL, CONF_HOST)
+    )
+
     RANDOM_COLOR_SCHEMA = vol.All(
         vol.Schema({
             vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
@@ -95,28 +97,37 @@ if __name__ != "__main__":
 def setup(hass, config):
     def turn_light_to_matched_color(call):
         call_data = dict(call.data)
-        comp_config = config[DOMAIN]
+        comp_config = dict(config[DOMAIN])
+        
         color_fx = ColorFX(hass, comp_config)
         mode = call_data.pop(ATTR_MODE)
         same_color = call_data.pop(ATTR_SAME_COLOR)
+        
         if ATTR_URL in call_data:
             url = call_data.pop(ATTR_URL)
         elif ATTR_MEDIA_PLAYER in call_data:
-            if CONF_HOST in comp_config and comp_config[CONF_HOST]:
-                entity = call_data.pop(ATTR_MEDIA_PLAYER)
-                state = hass.states.get(entity)
-                if state:
-                    attrs = state.attributes
-                    if ATTR_ENTITY_PICTURE in attrs and attrs[ATTR_ENTITY_PICTURE]:
-                        url = '{}{}'.format(comp_config[CONF_HOST], attrs[ATTR_ENTITY_PICTURE])
-                    else:
-                        _LOGGER.info('{} has no {} attribute.'.format(entity, ATTR_ENTITY_PICTURE))
-                        return
+            _LOGGER.info('call_data: ' + str(call_data))
+            host = ''
+            if CONF_HOST not in call_data:
+                if CONF_HOST not in comp_config:
+                    raise ValueError('\'media_player\' set, but no \'host\' found.')
                 else:
-                    raise ValueError('{} is unavailable in the system.'.format(entity))
+                    host = comp_config[CONF_HOST]
             else:
-                raise ValueError('\'media_player\' set, but no \'host\' found in the configuration.')
+                host = call_data.pop(CONF_HOST)
 
+            entity = call_data.pop(ATTR_MEDIA_PLAYER)
+            state = hass.states.get(entity)
+            if state:
+                attrs = state.attributes
+                if ATTR_ENTITY_PICTURE in attrs and attrs[ATTR_ENTITY_PICTURE]:
+                    url = '{}{}'.format(host, attrs[ATTR_ENTITY_PICTURE])
+                else:
+                    _LOGGER.info('{} has no {} attribute.'.format(entity, ATTR_ENTITY_PICTURE))
+                    return
+            else:
+                raise ValueError('{} is unavailable in the system.'.format(entity))
+                
         colors = color_fx.matched_colors(url,
                                          mode,
                                          len(call_data[ATTR_ENTITY_ID]) + 1)

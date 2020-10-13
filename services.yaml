@@ -10,6 +10,8 @@ turn_light_to_matched_color:
     media_player:
       description: "A single entity ID for which to use the 'entity_picture' state for recognition. This must be specified if 'url' is not. If this is specified, 'host' must be set in the confgiguration."
       example: media_player.android_tv
+    host: "(Optional) Override 'host' from configuration. Can only be used with 'media_player'."
+      example: "http://192.168.1.42:8123"
     mode:
       description: (Optional) Changes the recognition mode.
       example: "'recognized' or 'complementary'"

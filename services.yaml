@@ -5,8 +5,11 @@ turn_light_to_matched_color:
       description: Entity ID(s) of the light(s) you wish to change.
       example: light.lamp
     url:
-      description: URL of an image to use for color recognition.
+      description: "URL of an image to use for color recognition. This must be specified if 'media_player' is not."
       example: https://f4.bcbits.com/img/a0581187129_10.jpg
+    media_player:
+      description: "A single entity ID for which to use the 'entity_picture' state for recognition. This must be specified if 'url' is not. If this is specified, 'host' must be set in the confgiguration."
+      example: media_player.android_tv
     mode:
       description: (Optional) Changes the recognition mode.
       example: "'recognized' or 'complementary'"

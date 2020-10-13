@@ -7,12 +7,18 @@ import math
 
 import urllib.request
 
-DOMAIN = 'color_fx'
 _LOGGER = logging.getLogger(__name__)
 
+DOMAIN = 'color_fx'
+CONF_HOST = 'host'
+
 ATTR_URL = 'url'
+ATTR_MEDIA_PLAYER = 'media_player'
 ATTR_MODE = 'mode'
 ATTR_SAME_COLOR = 'same_color'
+
+ATTR_ENTITY_PICTURE = 'entity_picture'
+ATTR_EXCLUSIVE_IMAGE = 'image'
 
 ATTR_RANGE_HUE = 'range_hue'
 ATTR_RANGE_SAT = 'range_sat'
@@ -38,10 +44,15 @@ if __name__ != "__main__":
     from homeassistant.const import (ATTR_ENTITY_ID, SERVICE_TURN_ON)
     from homeassistant.components.light import (ATTR_RGB_COLOR, ATTR_HS_COLOR, ATTR_BRIGHTNESS)
     from homeassistant.components import light
+    
+    CONFIG_SCHEMA = vol.Schema({
+        vol.Optional(ATTR_HOST, default=''): cv.string
+    }, extra=vol.ALLOW_EXTRA)
 
     MATCHED_COLOR_SCHEMA = vol.Schema({
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-        vol.Required(ATTR_URL): cv.url,
+        vol.Exclusive(ATTR_MEDIA_PLAYER, ATTR_EXCLUSIVE_IMAGE): cv.entity_id,
+        vol.Exclusive(ATTR_URL, ATTR_EXCLUSIVE_IMAGE): cv.url,
         vol.Optional(ATTR_MODE, default='recognized'): cv.string,
         vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean
     }, extra=vol.ALLOW_EXTRA)
@@ -61,11 +72,29 @@ if __name__ != "__main__":
 def setup(hass, config):
     def turn_light_to_matched_color(call):
         call_data = dict(call.data)
-        color_fx = ColorFX(hass, config[DOMAIN])
+        comp_config = config[DOMAIN]
+        color_fx = ColorFX(hass, comp_config)
         mode = call_data.pop(ATTR_MODE)
         same_color = call_data.pop(ATTR_SAME_COLOR)
+        if ATTR_URL in call_data:
+            url = call_data.pop(ATTR_URL)
+        elif ATTR_MEDIA_PLAYER in call_data:
+            if CONF_HOST in comp_config and comp_config[CONF_HOST]:
+                entity = call_data.pop(ATTR_MEDIA_PLAYER)
+                state = hass.states.get(entity)
+                if state:
+                    attrs = state.attributes
+                    if ATTR_ENTITY_PICTURE in attrs and attrs[ATTR_ENTITY_PICTURE]:
+                        url = '{}{}'.format(comp_config[CONF_HOST], attrs[ATTR_ENTITY_PICTURE])
+                    else:
+                        _LOGGER.info('{} has no {} attribute.'.format(entity, ATTR_ENTITY_PICTURE))
+                        return
+                else:
+                    raise ValueError('{} is unavailable in the system.'.format(entity))
+            else:
+                raise ValueError('\'media_player\' set, but no \'host\' found in the configuration.')
 
-        colors = color_fx.matched_colors(call_data.pop(ATTR_URL),
+        colors = color_fx.matched_colors(url,
                                          mode,
                                          len(call_data[ATTR_ENTITY_ID]) + 1)
         colorfulness = list(colors.keys())

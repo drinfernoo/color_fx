@@ -8,6 +8,7 @@ Simply add this repository in HACS, and install it :ok_hand:
 To enable the integration, you'll need to add the following to your `configuration.yaml`:
 ```yaml
 color_fx:
+  host: !secret internal_url  # your HA instance's local address, only **required** if using color_fx.turn_light_to_matched_color with 'media_player'
 ```
 
 ### Features

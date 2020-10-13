@@ -21,6 +21,7 @@ ATTR_ENTITY_PICTURE = 'entity_picture'
 
 GROUP_EXCLUSIVE_IMAGE = 'image'
 GROUP_EXCLUSIVE_COLOR_MODE = 'color_mode'
+GROUP_EXCLUSIVE_BRIGHTNESS = 'brightness'
 
 MODE_RECOGNIZED = 'recognized'
 MODE_COMPLEMENTARY = 'complementary'
@@ -36,8 +37,13 @@ SERVICE_TURN_LIGHT_TO_RANDOM_COLOR = 'turn_light_to_random_color'
 
 DEFAULT_IMAGE_RESIZE = (100, 100)
 DEFAULT_COLOR = [230, 230, 230]
-DEFAULT_HS_COLORS = {'hue': [0, 360], 'saturation': [80, 100]}
-DEFAULT_RGB_COLORS = {'red': [0, 255], 'green': [0, 255], 'blue': [0, 255]}
+DEFAULT_BRIGHTNESS = 192
+DEFAULT_BRIGHTNESS_RANGE = [0, 255]
+DEFAULT_BRIGHTNESS_PCT = 75
+DEFAULT_BRIGHTNESS_PCT_RANGE = [0, 100]
+DEFAULT_BRIGHTNESS_GRAY = 128
+DEFAULT_HS_COLORS = {ATTR_HUE: [0, 360], ATTR_SATURATION: [80, 100]}
+DEFAULT_RGB_COLORS = {ATTR_RED: [0, 255], ATTR_GREEN: [0, 255], ATTR_BLUE: [0, 255]}
                   
 ERROR_MISSING_SOURCE = 'Must have either \'{}\' or \'{}\'.'.format(ATTR_MEDIA_PLAYER, ATTR_URL)
 ERROR_INVALID_MODE = 'Must be either \'{}\' or \'{}\'.'
@@ -47,7 +53,8 @@ if __name__ != "__main__":
 
     from homeassistant.helpers import config_validation as cv
     from homeassistant.const import (ATTR_ENTITY_ID, SERVICE_TURN_ON)
-    from homeassistant.components.light import (ATTR_RGB_COLOR, ATTR_HS_COLOR, ATTR_BRIGHTNESS)
+    from homeassistant.components.light import (ATTR_RGB_COLOR, ATTR_HS_COLOR,
+                                                ATTR_BRIGHTNESS, ATTR_BRIGHTNESS_PCT)
     from homeassistant.components import light
     
     CONFIG_SCHEMA = vol.Schema({
@@ -74,6 +81,10 @@ if __name__ != "__main__":
             vol.Exclusive(ATTR_URL, GROUP_EXCLUSIVE_IMAGE): cv.url,
             vol.Optional(ATTR_MODE, default=MODE_RECOGNIZED): vol.Any(MODE_RECOGNIZED, MODE_COMPLEMENTARY,
                 msg=ERROR_INVALID_MODE.format(MODE_RECOGNIZED, MODE_COMPLEMENTARY)),
+            vol.Exclusive(vol.Optional(ATTR_BRIGHTNESS, default=DEFAULT_BRIGHTNESS),
+                GROUP_EXCLUSIVE_BRIGHTNESS): cv.positive_int,
+            vol.Exclusive(vol.Optional(ATTR_BRIGHTNESS_PCT, default=DEFAULT_BRIGHTNESS_PCT),
+                GROUP_EXCLUSIVE_BRIGHTNESS): cv.positive_int
         }),
         cv.has_at_least_one_key(ATTR_MEDIA_PLAYER, ATTR_URL),
         cv.has_at_most_one_key(ATTR_URL, CONF_HOST)
@@ -84,13 +95,14 @@ if __name__ != "__main__":
             vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
             vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean,
             vol.Exclusive(vol.Optional(ATTR_HS_COLOR, default=DEFAULT_HS_COLORS),
-                GROUP_EXCLUSIVE_COLOR_MODE,
-                msg=ERROR_INVALID_MODE.format(ATTR_HS_COLOR, ATTR_RGB_COLOR)): HS_COLOR_SCHEMA,
+                GROUP_EXCLUSIVE_COLOR_MODE): HS_COLOR_SCHEMA,
             vol.Exclusive(vol.Optional(ATTR_RGB_COLOR, default=DEFAULT_RGB_COLORS),
-                GROUP_EXCLUSIVE_COLOR_MODE,
-                msg=ERROR_INVALID_MODE.format(ATTR_HS_COLOR, ATTR_RGB_COLOR)): RGB_COLOR_SCHEMA
-        }),
-        cv.has_at_most_one_key(ATTR_HS_COLOR, ATTR_RGB_COLOR)
+                GROUP_EXCLUSIVE_COLOR_MODE): RGB_COLOR_SCHEMA,
+            vol.Exclusive(vol.Optional(ATTR_BRIGHTNESS, default=DEFAULT_BRIGHTNESS),
+                GROUP_EXCLUSIVE_BRIGHTNESS): vol.Any(cv.positive_int, [cv.positive_int]),
+            vol.Exclusive(vol.Optional(ATTR_BRIGHTNESS_PCT, default=DEFAULT_BRIGHTNESS_PCT),
+                GROUP_EXCLUSIVE_BRIGHTNESS): vol.Any(cv.positive_int, [cv.positive_int])
+        })
     )
 
 
@@ -128,27 +140,36 @@ def setup(hass, config):
             else:
                 raise ValueError('{} is unavailable in the system.'.format(entity))
                 
-        colors = color_fx.matched_colors(url,
-                                         mode,
+        brightness_mode = ATTR_BRIGHTNESS
+        brightness = DEFAULT_BRIGHTNESS
+        if ATTR_BRIGHTNESS_PCT in call_data:
+            brightness_mode = ATTR_BRIGHTNESS_PCT
+            brightness = call_data.pop(ATTR_BRIGHTNESS_PCT)
+        elif ATTR_BRIGHTNESS in call_data:
+            brightness = call_data.pop(ATTR_BRIGHTNESS)
+
+        colors = color_fx.matched_colors(url, mode,
                                          len(call_data[ATTR_ENTITY_ID]) + 1)
         colorfulness = list(colors.keys())
 
         calls = []
         if same_color:
             color = colors[colorfulness[0]]
+            brightness = DEFAULT_BRIGHTNESS_GRAY if color[1:] == color[:-1] else brightness
             new_data = {ATTR_ENTITY_ID: call_data[ATTR_ENTITY_ID]}
             new_data[ATTR_RGB_COLOR] = color
-            new_data[ATTR_BRIGHTNESS] = 128 if color[1:] == color[:-1] else 192
+            new_data[brightness_mode] = brightness
             calls.append(new_data)
         else:
             for idx, entity in enumerate(call_data[ATTR_ENTITY_ID]):
                 color = colors[colorfulness[idx]]
                 if mode == MODE_COMPLEMENTARY:
                     color = [abs(c - 255) for c in color]
+                brightness = DEFAULT_BRIGHTNESS_GRAY if color[1:] == color[:-1] else brightness
 
                 new_data = {ATTR_ENTITY_ID: [entity]}
                 new_data[ATTR_RGB_COLOR] = color
-                new_data[ATTR_BRIGHTNESS] = 128 if color[1:] == color[:-1] else 192
+                new_data[brightness_mode] = brightness
                 calls.append(new_data)
 
         for call in calls:
@@ -157,37 +178,55 @@ def setup(hass, config):
 
     def turn_light_to_random_color(call):
         call_data = dict(call.data)
+        
         color_fx = ColorFX(hass, config[DOMAIN])
-        
-        mode = ATTR_HS_COLOR
-        ranges = DEFAULT_HS_COLORS
-        data = {}
+        color_mode = ATTR_HS_COLOR
+        color_ranges = DEFAULT_HS_COLORS
+        color_data = {}
         if ATTR_RGB_COLOR in call_data:
-            mode = ATTR_RGB_COLOR
-            data = call_data.pop(ATTR_RGB_COLOR)
+            color_mode = ATTR_RGB_COLOR
+            color_ranges = DEFAULT_RGB_COLORS
+            color_data = call_data.pop(ATTR_RGB_COLOR)
         elif ATTR_HS_COLOR in call_data:
-            data = call_data.pop(ATTR_HS_COLOR)
-        
-        for r in [i for i in ranges if i in data]:
-            v = data[r]
-            ranges[r] = v if isinstance(v, list) else [v]
+            color_data = call_data.pop(ATTR_HS_COLOR)
+            
+        for r in [i for i in color_ranges if i in color_data]:
+            v = color_data[r]
+            color_ranges[r] = v if isinstance(v, list) else [v]
+            
+        brightness_mode = ATTR_BRIGHTNESS
+        brightness_ranges = {ATTR_BRIGHTNESS: DEFAULT_BRIGHTNESS}
+        brightness_data = {}
+        if ATTR_BRIGHTNESS_PCT in call_data:
+            brightness_mode = ATTR_BRIGHTNESS_PCT
+            brightness_ranges = DEFAULT_BRIGHTNESS_PCT
+            brightness_data = {ATTR_BRIGHTNESS_PCT: call_data.pop(ATTR_BRIGHTNESS_PCT)}
+        elif ATTR_BRIGHTNESS in call_data:
+            brightness_data = {ATTR_BRIGHTNESS: call_data.pop(ATTR_BRIGHTNESS)}
+            
+        for r in [i for i in brightness_ranges if i in brightness_data]:
+            v = brightness_data[r]
+            brightness_ranges[r] = v if isinstance(v, list) else [v]
             
         same_color = call_data.pop(ATTR_SAME_COLOR)
 
         calls = []
         if same_color:
-            color = color_fx.random_color(mode, ranges)
+            color = color_fx.random_color(color_ranges, color_mode)
+            brightness = color_fx.random_brightness(brightness_ranges, brightness_mode)
+            
             new_data = {ATTR_ENTITY_ID: call_data[ATTR_ENTITY_ID]}
-            new_data[mode] = color
-            new_data[ATTR_BRIGHTNESS] = 192
+            new_data[color_mode] = color
+            new_data[brightness_mode] = brightness
             calls.append(new_data)
         else:
             for entity in call_data[ATTR_ENTITY_ID]:
-                color = color_fx.random_color(mode, ranges)
+                color = color_fx.random_color(color_ranges, color_mode)
+                brightness = color_fx.random_brightness(brightness_ranges, brightness_mode)
 
                 new_data = {ATTR_ENTITY_ID: [entity]}
-                new_data[mode] = color
-                new_data[ATTR_BRIGHTNESS] = 192
+                new_data[color_mode] = color
+                new_data[brightness_mode] = brightness
                 calls.append(new_data)
 
         for call in calls:
@@ -360,17 +399,10 @@ class ColorFX:
         best_colors = SpotifyBackgroundColor(url, resize=True).best_colors(k=top * 2, color_tol=5)
         return best_colors
 
-    def random_color(self, mode=ATTR_HS_COLOR, ranges=DEFAULT_HS_COLORS):
-        for range in ranges:
-            if len(ranges[range]) == 1:
-                ranges[range] = [ranges[range][0], ranges[range][0]]
-            elif len(ranges[range]) > 2:
-                ranges[range] = [ranges[range][0], ranges[range][1]]
-
-        if any(ranges[i][0] > ranges[i][1] for i in ranges):
-              raise ValueError('Lower bound cannot be greater than higher bound for range.')
-
+    def random_color(self, ranges=DEFAULT_HS_COLORS, mode=ATTR_HS_COLOR):
         import random
+        ranges = self._fix_ranges(ranges)
+
         if mode == ATTR_HS_COLOR:
             c = [random.randint(ranges[ATTR_HUE][0], ranges[ATTR_HUE][1]),
                  random.randint(ranges[ATTR_SATURATION][0], ranges[ATTR_SATURATION][1])]
@@ -385,6 +417,32 @@ class ColorFX:
             c[2] = clamp(c[2], DEFAULT_RGB_COLORS[ATTR_BLUE][0], DEFAULT_RGB_COLORS[ATTR_BLUE][1])
 
         return c
+        
+    def random_brightness(self, ranges=DEFAULT_BRIGHTNESS, mode=ATTR_BRIGHTNESS):
+        import random
+        
+        ranges = self._fix_ranges(ranges, mode) 
+        c = random.randint(ranges[mode][0], ranges[mode][1])
+        if mode == ATTR_BRIGHTNESS:
+            c = clamp(c, DEFAULT_BRIGHTNESS_RANGE[0], DEFAULT_BRIGHTNESS_RANGE[1])
+        elif mode == ATTR_BRIGHTNESS_PCT:
+            c = clamp(c, DEFAULT_BRIGHTNESS_PCT_RANGE[0], DEFAULT_BRIGHTNESS_PCT_RANGE[1])
+
+        return c
+    
+    def _fix_ranges(self, ranges, mode=0):
+        ranges = ranges if isinstance(ranges, dict) else {mode: ranges}
+
+        for range in ranges:
+            if len(ranges[range]) == 1:
+                ranges[range] = [ranges[range][0], ranges[range][0]]
+            elif len(ranges[range]) > 2:
+                ranges[range] = [ranges[range][0], ranges[range][1]]
+
+        if any(ranges[i][0] > ranges[i][1] for i in ranges):
+              raise ValueError('Lower bound cannot be greater than higher bound for range.')
+
+        return ranges
 
 
 if __name__ == "__main__":

@@ -18,24 +18,29 @@ ATTR_MODE = 'mode'
 ATTR_SAME_COLOR = 'same_color'
 
 ATTR_ENTITY_PICTURE = 'entity_picture'
-ATTR_EXCLUSIVE_IMAGE = 'image'
 
-ATTR_RANGE_HUE = 'range_hue'
-ATTR_RANGE_SAT = 'range_sat'
-ATTR_RANGE_RED = 'range_red'
-ATTR_RANGE_GREEN = 'range_green'
-ATTR_RANGE_BLUE = 'range_blue'
+GROUP_EXCLUSIVE_IMAGE = 'image'
+GROUP_EXCLUSIVE_COLOR_MODE = 'color_mode'
+
+MODE_RECOGNIZED = 'recognized'
+MODE_COMPLEMENTARY = 'complementary'
+
+ATTR_HUE = 'hue'
+ATTR_SATURATION = 'saturation'
+ATTR_RED = 'red'
+ATTR_GREEN = 'green'
+ATTR_BLUE = 'blue'
 
 SERVICE_TURN_LIGHT_TO_MATCHED_COLOR = 'turn_light_to_matched_color'
 SERVICE_TURN_LIGHT_TO_RANDOM_COLOR = 'turn_light_to_random_color'
 
 DEFAULT_IMAGE_RESIZE = (100, 100)
 DEFAULT_COLOR = [230, 230, 230]
-DEFAULT_RANGES = {ATTR_RANGE_HUE: (0, 360),
-                  ATTR_RANGE_SAT: (80, 100),
-                  ATTR_RANGE_RED: (0, 255),
-                  ATTR_RANGE_GREEN: (0, 255),
-                  ATTR_RANGE_BLUE: (0, 255)}
+DEFAULT_HS_COLORS = {'hue': [0, 360], 'saturation': [80, 100]}
+DEFAULT_RGB_COLORS = {'red': [0, 255], 'green': [0, 255], 'blue': [0, 255]}
+                  
+ERROR_MISSING_SOURCE = 'Must have either \'{}\' or \'{}\'.'.format(ATTR_MEDIA_PLAYER, ATTR_URL)
+ERROR_INVALID_MODE = 'Must be either \'{}\' or \'{}\'.'
 
 if __name__ != "__main__":
     import voluptuous as vol
@@ -46,27 +51,45 @@ if __name__ != "__main__":
     from homeassistant.components import light
     
     CONFIG_SCHEMA = vol.Schema({
-        vol.Optional(ATTR_HOST, default=''): cv.string
+        vol.Optional(CONF_HOST, default=''): cv.string
     }, extra=vol.ALLOW_EXTRA)
+    
+    MATCHED_COLOR_SCHEMA = vol.All(
+        vol.Schema({
+            vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
+            vol.Exclusive(ATTR_MEDIA_PLAYER, GROUP_EXCLUSIVE_IMAGE): cv.entity_id,
+            vol.Exclusive(ATTR_URL, GROUP_EXCLUSIVE_IMAGE): cv.url,
+            vol.Optional(ATTR_MODE, default=MODE_RECOGNIZED): vol.Any(MODE_RECOGNIZED, MODE_COMPLEMENTARY,
+                msg=ERROR_INVALID_MODE.format(MODE_RECOGNIZED, MODE_COMPLEMENTARY)),
+            vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean
+        }),
+        cv.has_at_least_one_key(ATTR_MEDIA_PLAYER, ATTR_URL)
+    )
 
-    MATCHED_COLOR_SCHEMA = vol.Schema({
-        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-        vol.Exclusive(ATTR_MEDIA_PLAYER, ATTR_EXCLUSIVE_IMAGE): cv.entity_id,
-        vol.Exclusive(ATTR_URL, ATTR_EXCLUSIVE_IMAGE): cv.url,
-        vol.Optional(ATTR_MODE, default='recognized'): cv.string,
-        vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean
-    }, extra=vol.ALLOW_EXTRA)
-
-    RANDOM_COLOR_SCHEMA = vol.Schema({
-        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-        vol.Optional(ATTR_MODE, default='hs_color'): cv.string,
-        vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean,
-        vol.Optional(ATTR_RANGE_HUE, default=(0, 360)): cv.positive_int,
-        vol.Optional(ATTR_RANGE_SAT, default=(80, 100)): cv.positive_int,
-        vol.Optional(ATTR_RANGE_RED, default=(0, 255)): cv.positive_int,
-        vol.Optional(ATTR_RANGE_GREEN, default=(0, 255)): cv.positive_int,
-        vol.Optional(ATTR_RANGE_BLUE, default=(0, 255)): cv.positive_int
-    }, extra=vol.ALLOW_EXTRA)
+    HS_COLOR_SCHEMA = vol.Schema({
+        vol.Optional(ATTR_HUE, default=DEFAULT_HS_COLORS[ATTR_HUE]): vol.Any(cv.positive_int, [cv.positive_int]),
+        vol.Optional(ATTR_SATURATION, default=DEFAULT_HS_COLORS[ATTR_SATURATION]): vol.Any(cv.positive_int, [cv.positive_int])
+    })
+    
+    RGB_COLOR_SCHEMA = vol.Schema({
+        vol.Optional(ATTR_RED, default=DEFAULT_RGB_COLORS[ATTR_RED]): vol.Any(cv.positive_int, [cv.positive_int]),
+        vol.Optional(ATTR_GREEN, default=DEFAULT_RGB_COLORS[ATTR_GREEN]): vol.Any(cv.positive_int, [cv.positive_int]),
+        vol.Optional(ATTR_BLUE, default=DEFAULT_RGB_COLORS[ATTR_BLUE]): vol.Any(cv.positive_int, [cv.positive_int])
+    })
+    
+    RANDOM_COLOR_SCHEMA = vol.All(
+        vol.Schema({
+            vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
+            vol.Optional(ATTR_SAME_COLOR, default=False): cv.boolean,
+            vol.Exclusive(vol.Optional(ATTR_HS_COLOR, default=DEFAULT_HS_COLORS),
+                GROUP_EXCLUSIVE_COLOR_MODE,
+                msg=ERROR_INVALID_MODE.format(ATTR_HS_COLOR, ATTR_RGB_COLOR)): HS_COLOR_SCHEMA,
+            vol.Exclusive(vol.Optional(ATTR_RGB_COLOR, default=DEFAULT_RGB_COLORS),
+                GROUP_EXCLUSIVE_COLOR_MODE,
+                msg=ERROR_INVALID_MODE.format(ATTR_HS_COLOR, ATTR_RGB_COLOR)): RGB_COLOR_SCHEMA
+        }),
+        cv.has_at_most_one_key(ATTR_HS_COLOR, ATTR_RGB_COLOR)
+    )
 
 
 def setup(hass, config):
@@ -109,7 +132,7 @@ def setup(hass, config):
         else:
             for idx, entity in enumerate(call_data[ATTR_ENTITY_ID]):
                 color = colors[colorfulness[idx]]
-                if mode == 'complementary':
+                if mode == MODE_COMPLEMENTARY:
                     color = [abs(c - 255) for c in color]
 
                 new_data = {ATTR_ENTITY_ID: [entity]}
@@ -124,14 +147,21 @@ def setup(hass, config):
     def turn_light_to_random_color(call):
         call_data = dict(call.data)
         color_fx = ColorFX(hass, config[DOMAIN])
-        mode = call_data.pop(ATTR_MODE)
+        
+        mode = ATTR_HS_COLOR
+        ranges = DEFAULT_HS_COLORS
+        data = {}
+        if ATTR_RGB_COLOR in call_data:
+            mode = ATTR_RGB_COLOR
+            data = call_data.pop(ATTR_RGB_COLOR)
+        elif ATTR_HS_COLOR in call_data:
+            data = call_data.pop(ATTR_HS_COLOR)
+        
+        for r in [i for i in ranges if i in data]:
+            v = data[r]
+            ranges[r] = v if isinstance(v, list) else [v]
+            
         same_color = call_data.pop(ATTR_SAME_COLOR)
-
-        ranges = DEFAULT_RANGES
-        range_keys = list(ranges.keys())
-        for idx, r in enumerate(range_keys):
-            if r in call_data:
-                ranges[r] = list(call_data.pop(r))
 
         calls = []
         if same_color:
@@ -315,44 +345,33 @@ class ColorFX:
         self.hass = hass
         self.config = component_config
 
-    def matched_colors(self, url, mode='recognized', top=2):
-        if mode in ['recognized', 'complementary']:
-            best_colors = SpotifyBackgroundColor(url, resize=True).best_colors(k=top * 2, color_tol=5)
+    def matched_colors(self, url, mode=MODE_RECOGNIZED, top=2):
+        best_colors = SpotifyBackgroundColor(url, resize=True).best_colors(k=top * 2, color_tol=5)
+        return best_colors
 
-            return best_colors
-        else:
-            raise ValueError('Invalid Mode. Only \'recognized\' \
-                             and \'complementary\' are supported.')
+    def random_color(self, mode=ATTR_HS_COLOR, ranges=DEFAULT_HS_COLORS):
+        for range in ranges:
+            if len(ranges[range]) == 1:
+                ranges[range] = [ranges[range][0], ranges[range][0]]
+            elif len(ranges[range]) > 2:
+                ranges[range] = [ranges[range][0], ranges[range][1]]
 
-    def random_color(self, mode='hs_color', ranges=None):
-        if mode in ['hs_color', 'rgb_color']:
-            ranges = ranges if ranges else DEFAULT_RANGES
+        if any(ranges[i][0] > ranges[i][1] for i in ranges):
+              raise ValueError('Lower bound cannot be greater than higher bound for range.')
 
-            for range in ranges:
-                if len(ranges[range]) == 1:
-                    ranges[range] = [ranges[range][0], ranges[range][0]]
-                elif len(ranges[range]) > 2:
-                    ranges[range] = [ranges[range][0], ranges[range][1]]
-
-            if any(ranges[i][0] > ranges[i][1] for i in ranges):
-                  raise ValueError('Lower bound cannot be greater than higher bound for range.')
-
-            import random
-            if mode == 'hs_color':
-                c = [random.randint(ranges[ATTR_RANGE_HUE][0], ranges[ATTR_RANGE_HUE][1]),
-                     random.randint(ranges[ATTR_RANGE_SAT][0], ranges[ATTR_RANGE_SAT][1])]
-                c[0] = clamp(c[0], DEFAULT_RANGES[ATTR_RANGE_HUE][0], DEFAULT_RANGES[ATTR_RANGE_HUE][1])
-                c[1] = clamp(c[1], DEFAULT_RANGES[ATTR_RANGE_SAT][0], DEFAULT_RANGES[ATTR_RANGE_SAT][1])
-            elif mode == 'rgb_color':
-                c = [random.randint(ranges[ATTR_RANGE_RED][0], ranges[ATTR_RANGE_RED][1]),
-                     random.randint(ranges[ATTR_RANGE_GREEN][0], ranges[ATTR_RANGE_GREEN][1]),
-                     random.randint(ranges[ATTR_RANGE_BLUE][0], ranges[ATTR_RANGE_BLUE][1])]
-                c[0] = clamp(c[0], DEFAULT_RANGES[ATTR_RANGE_RED][0], DEFAULT_RANGES[ATTR_RANGE_RED][1])
-                c[1] = clamp(c[1], DEFAULT_RANGES[ATTR_RANGE_GREEN][0], DEFAULT_RANGES[ATTR_RANGE_GREEN][1])
-                c[2] = clamp(c[2], DEFAULT_RANGES[ATTR_RANGE_BLUE][0], DEFAULT_RANGES[ATTR_RANGE_BLUE][1])
-        else:
-            raise ValueError('Invalid Mode. Only \'rgb_color\' and \'hs_color\' \
-                             are supported.')
+        import random
+        if mode == ATTR_HS_COLOR:
+            c = [random.randint(ranges[ATTR_HUE][0], ranges[ATTR_HUE][1]),
+                 random.randint(ranges[ATTR_SATURATION][0], ranges[ATTR_SATURATION][1])]
+            c[0] = clamp(c[0], DEFAULT_HS_COLORS[ATTR_HUE][0], DEFAULT_HS_COLORS[ATTR_HUE][1])
+            c[1] = clamp(c[1], DEFAULT_HS_COLORS[ATTR_SATURATION][0], DEFAULT_HS_COLORS[ATTR_SATURATION][1])
+        elif mode == ATTR_RGB_COLOR:
+            c = [random.randint(ranges[ATTR_RED][0], ranges[ATTR_RED][1]),
+                 random.randint(ranges[ATTR_GREEN][0], ranges[ATTR_GREEN][1]),
+                 random.randint(ranges[ATTR_BLUE][0], ranges[ATTR_BLUE][1])]
+            c[0] = clamp(c[0], DEFAULT_RGB_COLORS[ATTR_RED][0], DEFAULT_RGB_COLORS[ATTR_RED][1])
+            c[1] = clamp(c[1], DEFAULT_RGB_COLORS[ATTR_GREEN][0], DEFAULT_RGB_COLORS[ATTR_GREEN][1])
+            c[2] = clamp(c[2], DEFAULT_RGB_COLORS[ATTR_BLUE][0], DEFAULT_RGB_COLORS[ATTR_BLUE][1])
 
         return c
 

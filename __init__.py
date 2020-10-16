@@ -88,9 +88,9 @@ if __name__ != "__main__":
             vol.Exclusive(ATTR_URL, GROUP_EXCLUSIVE_IMAGE): cv.url,
             vol.Optional(ATTR_MODE, default=MODE_RECOGNIZED): vol.Any(MODE_RECOGNIZED, MODE_COMPLEMENTARY,
                 msg=ERROR_INVALID_MODE.format(MODE_RECOGNIZED, MODE_COMPLEMENTARY)),
-            vol.Exclusive(vol.Optional(ATTR_BRIGHTNESS, default=DEFAULT_BRIGHTNESS),
+            vol.Exclusive(vol.Optional(ATTR_BRIGHTNESS, default=DEFAULT_BRIGHTNESS[0]),
                 GROUP_EXCLUSIVE_BRIGHTNESS): cv.positive_int,
-            vol.Exclusive(vol.Optional(ATTR_BRIGHTNESS_PCT, default=DEFAULT_BRIGHTNESS_PCT),
+            vol.Exclusive(vol.Optional(ATTR_BRIGHTNESS_PCT, default=DEFAULT_BRIGHTNESS_PCT[0]),
                 GROUP_EXCLUSIVE_BRIGHTNESS): cv.positive_int
         }),
         cv.has_at_least_one_key(ATTR_MEDIA_PLAYER, ATTR_URL),
@@ -163,7 +163,7 @@ def setup(hass, config):
                 return
                 
         brightness_mode = ATTR_BRIGHTNESS
-        brightness = DEFAULT_BRIGHTNESS
+        brightness = DEFAULT_BRIGHTNESS[0]
         if ATTR_BRIGHTNESS_PCT in call_data:
             brightness_mode = ATTR_BRIGHTNESS_PCT
             brightness = call_data.pop(ATTR_BRIGHTNESS_PCT)
